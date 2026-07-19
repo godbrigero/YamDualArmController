@@ -1,0 +1,22 @@
+[project]
+name = "yam-teleop"
+version = "0.1.0"
+description = "Bimanual SO-101 to YAM teleoperation and ACT data pipeline"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "accelerate",
+    "feetech-servo-sdk",
+    "hf-transfer",
+    "huggingface-hub",
+    "i2rt @ git+https://github.com/i2rt-robotics/i2rt.git",
+    "lerobot[dataset,training]",
+    "numpy",
+    "opencv-python-headless>=4.9,<5",
+    "pyrealsense2; sys_platform != 'darwin'",
+    "rerun-sdk",
+]
+
+[tool.uv]
+package = false
+build-constraint-dependencies = ["scikit-build-core<0.10"]
