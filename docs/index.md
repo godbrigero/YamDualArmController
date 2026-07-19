@@ -6,8 +6,40 @@ headline_accent: Operator
 lede: >-
   Bimanual teleoperation of i2rt YAM arms with SO-101 leaders — calibrated by
   serial, validated before motion, and recorded into datasets you can train on.
+agent_prompt:
+  title: Let your AI editor set it up
+  subtitle: >-
+    Copy this into a chat opened in the folder you want the project in. It
+    installs, finds your hardware, calibrates, and stops before anything moves.
+  targets:
+    - Claude Code
+    - Codex
+    - Cursor
+  body: |
+    Set me up for bimanual YAM teleoperation — two i2rt YAM arms driven by SO-101 leader arms. I am on the Linux host the arms are plugged into. Run these in order, in the current directory:
+
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/godbrigero/YamDualArmController/main/scripts/initialize_new_project.bash)"   # needs uv installed first
+    ls -l /dev/serial/by-id   # every SO-101 leader should appear here
+    uv run scripts/calibrate.py --show
+    uv run scripts/calibrate.py --check-only
+
+    Then use the skill the installer wrote into .claude/skills/ and .agents/skills/: invoke /connect-yam-leader in Claude Code or $connect-yam-leader in Codex, and follow it to calibrate each leader and validate its joint mapping.
+
+    Finish line: --check-only passes for every leader in /dev/serial/by-id, outputs/mission_hacks_calibrations.json has an entry for each one, and load_bridge_config accepts every entry.
+
+    Do not start teleoperation — it commands real arms the moment it runs. Stop at the finish line and print the exact teleop command for me to run myself. Do not browse documentation before the finish line passes; if a step fails, fetch https://godbrigero.github.io/YamDualArmController/docs/troubleshoot/ and match the exact error.
+quickstart:
+  lead: Rather drive it yourself?
+  steps:
+    - label: Install into the current directory
+      command: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/godbrigero/YamDualArmController/main/scripts/initialize_new_project.bash)"
+      note: uv is the only prerequisite. Your calibration file is never overwritten.
+    - label: Run the skill that ships with it
+      sigil: ">_"
+      command: /connect-yam-leader
+      note: In Claude Code. Codex users invoke $connect-yam-leader. It handles discovery, calibration, and mapping checks, and never starts teleop on its own.
 actions:
-  - title: Run /connect-yam-leader
+  - title: Guided setup
     url: /docs/guided-setup/
     glyph: ">_"
     accent: true
@@ -19,21 +51,15 @@ actions:
 show_announcements: false
 ---
 
-## Start here: the agent does the setup
+## What the skill actually does
 
-This repository ships an agent skill that runs the whole path — hardware
-discovery, calibration, mapping validation, and a safe first teleop — and
-diagnoses failures against the exact errors the code raises. Invoke it:
-
-```text
-/connect-yam-leader        # Claude Code
-$connect-yam-leader        # Codex
-```
-
-It is already in your project after [Install](/docs/install/), in both
-`.claude/skills/` and `.agents/skills/`. See [Guided setup](/docs/guided-setup/)
-for what it will and won't do — notably, it never starts teleoperation on its
-own.
+The prompt above hands the whole path to your agent: hardware discovery,
+calibration, mapping validation, and a diagnosis for every error the code can
+raise. It is the same [`/connect-yam-leader`](/docs/guided-setup/) skill that
+lands in `.claude/skills/` and `.agents/skills/` when you install — so you can
+re-invoke it any time a leader misbehaves, not just on day one. It will not
+start teleoperation for you; that stays a decision you make with a hand on the
+e-stop.
 
 ## The path
 

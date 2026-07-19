@@ -1,0 +1,171 @@
+---
+layout: default
+---
+
+{%- comment -%}
+Local override of the Anodize `home` layout. The theme's sections are kept as
+they are; the hero gains an agent-first quick start: a setup prompt you paste
+into Claude Code / Codex / Cursor, with the one-command install and the skill
+invocation underneath for people who'd rather type it themselves.
+{%- endcomment -%}
+
+<div class="an-home">
+  <section class="an-hero">
+    <h1 class="an-hero__title">
+      {%- if page.headline_accent -%}
+        {{ page.headline }} <em>{{ page.headline_accent }}</em>
+      {%- else -%}
+        {{ page.headline | default: page.title }}
+      {%- endif -%}
+    </h1>
+    {%- if page.lede %}
+    <p class="an-hero__lede">{{ page.lede }}</p>
+    {%- endif %}
+
+    {%- if page.agent_prompt %}
+    <div class="an-prompt">
+      <div class="an-prompt__head">
+        <div class="an-prompt__heading">
+          <p class="an-prompt__title">{{ page.agent_prompt.title | default: "Paste this into your AI editor" }}</p>
+          {%- if page.agent_prompt.subtitle %}
+          <p class="an-prompt__subtitle">{{ page.agent_prompt.subtitle }}</p>
+          {%- endif %}
+        </div>
+        <button type="button" class="an-copybtn an-copybtn--accent" data-copy-target="#an-prompt-body">
+          <span class="an-copybtn__icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <rect x="5.25" y="5.25" width="9" height="9" rx="2" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M10.75 3.25A2 2 0 0 0 8.75 1.25h-5a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="an-copybtn__label">Copy prompt</span>
+        </button>
+      </div>
+
+      {%- if page.agent_prompt.targets %}
+      <ul class="an-prompt__targets">
+        {%- for target in page.agent_prompt.targets %}
+        <li>{{ target }}</li>
+        {%- endfor %}
+      </ul>
+      {%- endif %}
+
+      <pre id="an-prompt-body" class="an-prompt__body">{{ page.agent_prompt.body | strip | escape }}</pre>
+    </div>
+    {%- endif %}
+
+    {%- if page.quickstart %}
+    <div class="an-quick">
+      <p class="an-quick__lead">{{ page.quickstart.lead | default: "Rather run it yourself?" }}</p>
+
+      {%- for step in page.quickstart.steps %}
+      <div class="an-quick__step">
+        <span class="an-quick__num" aria-hidden="true">{{ forloop.index }}</span>
+        <div class="an-quick__body">
+          <p class="an-quick__label">{{ step.label }}</p>
+
+          <div class="an-cmd">
+            <code class="an-cmd__text"><span class="an-cmd__sigil" aria-hidden="true">{{ step.sigil | default: "$" }}</span>{{ step.command }}</code>
+            <button type="button" class="an-copybtn an-copybtn--ghost" data-copy="{{ step.command | escape }}"
+                    aria-label="Copy {{ step.label | downcase }} command">
+              <span class="an-copybtn__label">Copy</span>
+            </button>
+          </div>
+
+          {%- if step.note %}
+          <p class="an-quick__note">{{ step.note }}</p>
+          {%- endif %}
+        </div>
+      </div>
+      {%- endfor %}
+    </div>
+    {%- endif %}
+
+    {%- if page.actions %}
+    <div class="an-hero__actions">
+      {%- for action in page.actions %}
+      <a class="an-btn{% if action.accent %} an-btn--accent{% endif %}"
+         href="{{ action.url | relative_url }}"
+         {% if action.external %}target="_blank" rel="noopener"{% endif %}>
+        {%- if action.glyph %}<span class="an-btn__glyph">{{ action.glyph }}</span>{% endif -%}
+        {{ action.title }}
+      </a>
+      {%- endfor %}
+    </div>
+    {%- endif %}
+  </section>
+
+  {%- if page.logos %}
+  <section class="an-section">
+    <span class="an-eyebrow">{{ page.logos_label | default: "Powered by" }}</span>
+    <div class="an-logos">
+      {%- for logo in page.logos %}
+      {%- if logo.url %}<a href="{{ logo.url }}" target="_blank" rel="noopener">{% endif -%}
+      <img src="{{ logo.image | relative_url }}" alt="{{ logo.name }}" loading="lazy">
+      {%- if logo.url %}</a>{% endif -%}
+      {%- endfor %}
+    </div>
+  </section>
+  {%- endif %}
+
+  {%- assign posts = site.posts | slice: 0, 3 -%}
+  {%- if page.show_announcements != false and posts.size > 0 %}
+  <section class="an-section">
+    <span class="an-eyebrow">
+      <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <path d="M1 13L13 1M13 1H5M13 1v8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+      Latest announcements
+    </span>
+    <div class="an-cards">
+      {%- for post in posts %}
+      <a class="an-card" href="{{ post.url | relative_url }}">
+        <span class="an-card__time">{{ post.date | date: "%b %-d, %Y" }}</span>
+        <h3 class="an-card__title">{{ post.title }}</h3>
+        <p class="an-card__body">{{ post.description | default: post.excerpt | strip_html | truncate: 110 }}</p>
+      </a>
+      {%- endfor %}
+    </div>
+  </section>
+  {%- endif %}
+
+  {%- if content != "" %}
+  <section class="an-section an-prose">
+    {{ content }}
+  </section>
+  {%- endif %}
+</div>
+
+<script>
+/* Clipboard for the hero's setup prompt and command rows. */
+(function () {
+  "use strict";
+  if (!navigator.clipboard) return;
+
+  document.querySelectorAll("[data-copy], [data-copy-target]").forEach(function (btn) {
+    var label = btn.querySelector(".an-copybtn__label");
+    var original = label ? label.textContent : null;
+    var timer;
+
+    btn.addEventListener("click", function (event) {
+      event.preventDefault();
+      var text = btn.dataset.copy;
+      if (!text && btn.dataset.copyTarget) {
+        var target = document.querySelector(btn.dataset.copyTarget);
+        text = target ? target.textContent : "";
+      }
+      if (!text) return;
+
+      navigator.clipboard.writeText(text.trim()).then(function () {
+        btn.classList.add("is-done");
+        if (label) label.textContent = "Copied";
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+          btn.classList.remove("is-done");
+          if (label) label.textContent = original;
+        }, 1800);
+      });
+    });
+  });
+})();
+</script>

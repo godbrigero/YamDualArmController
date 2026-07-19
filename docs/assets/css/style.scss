@@ -1,0 +1,221 @@
+---
+---
+
+@import "jekyll-theme-anodize";
+
+// Hero quick start -----------------------------------------------------------
+// Local additions on top of the Anodize hero: an agent setup prompt you copy
+// into Claude Code, Codex, or Cursor, and the manual commands beneath it.
+
+.an-hero { max-width: 940px; }
+
+// The prompt card — the primary path.
+.an-prompt {
+  margin-top: 36px;
+  border: 1px solid var(--an-accent-edge);
+  border-radius: var(--an-radius);
+  background:
+    linear-gradient(180deg, var(--an-accent-bg-2) 0%, var(--an-bg-elev) 62%);
+  overflow: hidden;
+}
+
+.an-prompt__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 18px 16px 20px;
+  flex-wrap: wrap;
+}
+
+.an-prompt__title {
+  margin: 0;
+  color: var(--an-head);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.an-prompt__subtitle {
+  margin: 5px 0 0;
+  color: var(--an-dim);
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 52ch;
+}
+
+.an-prompt__targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0 20px 14px;
+  list-style: none;
+
+  li {
+    padding: 4px 11px;
+    border: 1px solid var(--an-chip-edge);
+    border-radius: 999px;
+    background: var(--an-chip);
+    color: var(--an-body);
+    font-family: var(--an-mono);
+    font-size: 12px;
+  }
+}
+
+.an-prompt__body {
+  margin: 0;
+  padding: 18px 20px 20px;
+  max-height: 260px;
+  overflow: auto;
+  border-top: 1px solid var(--an-line-soft);
+  background: var(--an-bg-code);
+  color: var(--an-code-fg);
+  font-family: var(--an-mono);
+  font-size: 12.5px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+
+  // Fade the overflow so it reads as scrollable, not truncated.
+  mask-image: linear-gradient(180deg, #000 calc(100% - 34px), transparent);
+}
+
+// Copy buttons ---------------------------------------------------------------
+.an-copybtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid var(--an-line);
+  background: var(--an-bg-elev-2);
+  color: var(--an-head);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s var(--an-ease), border-color 0.15s var(--an-ease),
+              color 0.15s var(--an-ease);
+
+  &:hover { border-color: var(--an-dim); }
+}
+
+.an-copybtn__icon {
+  display: inline-flex;
+  opacity: 0.8;
+}
+
+.an-copybtn--accent {
+  background: var(--an-accent);
+  border-color: var(--an-accent);
+  color: var(--an-accent-ink);
+  font-weight: 600;
+
+  &:hover { background: var(--an-accent-hi); border-color: var(--an-accent-hi); }
+  &.is-done { background: var(--an-accent-hi); border-color: var(--an-accent-hi); }
+}
+
+.an-copybtn--ghost {
+  height: 34px;
+  padding: 0 14px;
+  font-family: var(--an-mono);
+  font-size: 12px;
+  background: transparent;
+  color: var(--an-dim);
+
+  &:hover { background: var(--an-bg-elev-2); color: var(--an-head); }
+  &.is-done { color: var(--an-accent); border-color: var(--an-accent-edge); }
+}
+
+// Manual steps ---------------------------------------------------------------
+.an-quick { margin-top: 34px; }
+
+.an-quick__lead {
+  margin: 0 0 16px;
+  color: var(--an-mute);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.an-quick__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+
+  & + & { margin-top: 18px; }
+}
+
+.an-quick__num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-top: 3px;
+  border: 1px solid var(--an-line);
+  border-radius: 999px;
+  color: var(--an-dim);
+  font-family: var(--an-mono);
+  font-size: 12px;
+}
+
+.an-quick__body { min-width: 0; flex: 1; }
+
+.an-quick__label {
+  margin: 0 0 8px;
+  color: var(--an-head);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.an-quick__note {
+  margin: 8px 0 0;
+  color: var(--an-mute);
+  font-size: 13.5px;
+  line-height: 1.55;
+
+  code {
+    font-family: var(--an-mono);
+    font-size: 12.5px;
+    color: var(--an-body);
+  }
+}
+
+.an-cmd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--an-line);
+  border-radius: var(--an-radius-sm);
+  background: var(--an-bg-code);
+}
+
+.an-cmd__text {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-family: var(--an-mono);
+  font-size: 13px;
+  color: var(--an-code-fg);
+  scrollbar-width: thin;
+}
+
+.an-cmd__sigil {
+  margin-right: 10px;
+  color: var(--an-accent);
+  user-select: none;
+}
+
+@media (max-width: 640px) {
+  .an-prompt__head { align-items: flex-start; flex-direction: column; }
+  .an-cmd { flex-direction: column; align-items: stretch; padding: 12px; }
+  .an-cmd__text { padding-bottom: 4px; }
+  .an-copybtn--ghost { justify-content: center; }
+}
