@@ -39,6 +39,7 @@ from curation.pipeline import (
     artifact,
     load_detections,
     query_metrics,
+    require_submodule,
     run_pipeline,
     winnow_commit,
 )
@@ -61,13 +62,17 @@ def parse_detectors(value: str) -> tuple[str, ...]:
 
 def view(src: str, flagged_only: bool) -> int:
     """Open the corpus in the Rerun viewer, so a rejection can be overturned by eye."""
+    require_submodule()
     manifest = load_manifest(src)
     recordings = []
-    if flagged_only and manifest:
-        recordings = [artifact(src, os.path.join("rrd", f"{name}.rrd"))
-                      for name in sorted(manifest.rejected)]
-        if not recordings:
-            print("nothing was rejected; showing everything instead")
+    if flagged_only:
+        if manifest is None:
+            print(f"no curation.json in {src}; showing the whole corpus")
+        else:
+            recordings = [artifact(src, os.path.join("rrd", f"{name}.rrd"))
+                          for name in sorted(manifest.rejected)]
+            if not recordings:
+                print("nothing was rejected; showing the whole corpus instead")
     recordings = recordings or sorted(glob.glob(artifact(src, os.path.join("rrd", "*.rrd"))))
     if not recordings:
         raise SystemExit(f"nothing ingested for {src}; run `uv run -m curation --src {src}` first")
@@ -121,6 +126,9 @@ def main() -> int:
     stages, force = list(DEFAULT_STAGES), set()
     if args.transcode:
         stages.insert(1, "transcode")
+        # ingest.log_video is what links the transcodes into the .rrd, so
+        # transcoding an already-ingested corpus achieves nothing on its own
+        force.add("ingest")
     if "debris_outside_basket" in detectors:
         # residual.json has to exist before detect.py folds the stray-debris
         # detector into the panel, so detect runs after it and runs again

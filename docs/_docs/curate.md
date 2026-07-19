@@ -40,8 +40,22 @@ git submodule update --init third_party/winnow   # once, if you cloned without i
 ```
 
 Derived artifacts land in `episodes/<dataset>/.winnow/` — the `.rrd` recordings,
-the per-frame video signals, the feature table, the detector firings. Each stage
-is skipped if its artifact already exists; `--refresh` forces the work again.
+the per-frame video signals, the feature table, the detector firings.
+
+A stage is skipped only when its artifact already accounts for **every** episode
+in the corpus, so the usual workflow just works: record ten more episodes into a
+dataset you curated last week, re-run the same command, and only the outstanding
+ones are processed. Delete a bad recording and its derived artifacts are
+regenerated rather than left to describe a corpus that no longer exists.
+`--refresh` redoes everything from scratch.
+
+{% capture stale %}
+Existence alone is not a safe skip signal. An interrupted run leaves a partial
+`rrd/`, and a corpus that grew since the last run leaves every artifact a
+subset of it — in both cases the unaccounted episodes would land in neither
+`kept` nor `rejected`, and conversion would silently never see them.
+{% endcapture %}
+{% include callout.html type="info" title="Why coverage, not existence" body=stale %}
 
 ## Two filters, and neither is a score
 
@@ -78,6 +92,11 @@ sweeping-pasta setup — its own robustness audit found the chroma gates change
 their verdict under a 25% perturbation. Turn them on with
 `--detectors all` only if your task genuinely looks like that one, and check
 what they flag before you believe it.
+
+`--detectors all` also runs winnow's `residual.py`, which crashes after writing
+its results while rendering debug overlays for episode ids from its own corpus.
+Curation reports that as a warning and uses the scores, which were already
+written by then.
 {% endcapture %}
 {% include callout.html type="warn" title="Two of these are rig-specific" body=rig %}
 
@@ -159,3 +178,7 @@ instead.
 
 **`nothing ingested`** — the pipeline stopped before the `.rrd` files were
 written. The stage that failed printed why; `--refresh` re-runs it.
+
+**`the query failed. Available columns: …`** — the `--where` clause names a
+column the metrics table does not have. The message lists every column that
+exists and quotes DataFusion's own suggestion.

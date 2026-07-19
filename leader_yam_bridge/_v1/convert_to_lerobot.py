@@ -28,7 +28,10 @@ import numpy as np
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from curation.manifest import filter_episodes, load_manifest  # noqa: E402
+try:
+    from curation.manifest import filter_episodes, load_manifest
+except ImportError:  # copied out of the project on its own
+    filter_episodes = load_manifest = None
 
 CAMS = ["top", "wrist_1", "wrist_2"]
 # dataset camera keys per output format; source mp4 names are always CAMS.
@@ -59,6 +62,16 @@ def build_features(h, w, cam_keys):
 
 def resolve_curation(args):
     """The triage decision to honour, and where it came from. (None, None) if none."""
+    if load_manifest is None:
+        if args.curation == "require":
+            raise SystemExit(
+                "the curation package is not importable, so no manifest can be read. "
+                "Run this from a checkout with curation/ beside leader_yam_bridge/, "
+                "or pass --curation off."
+            )
+        print("curation package not importable — converting every episode.")
+        return None, None
+
     source = args.curation_manifest or args.src
     manifest = None if args.curation == "off" else load_manifest(source)
     if manifest is None:
@@ -179,9 +192,11 @@ def main():
     ds.finalize()
 
     # the decision travels with the data: "which episodes did this train on" has
-    # an answer on the Hub, not just on the machine that ran the conversion
+    # an answer on the Hub, not just on the machine that ran the conversion.
+    # ds.root rather than the path guessed above, which is wrong under
+    # HF_LEROBOT_HOME — and a wrong guess here would throw away a finished run.
     if manifest_src:
-        shutil.copy(manifest_src, os.path.join(root, "curation.json"))
+        shutil.copy(manifest_src, os.path.join(getattr(ds, "root", root), "curation.json"))
         print(f"recorded curation.json in the dataset ({manifest.summary()})")
 
     print(f"done. local dataset: {root}")

@@ -95,22 +95,40 @@ sync_managed_directory() {
 install_winnow() {
     local project_directory=$1
     local target_directory="$project_directory/third_party/winnow"
+    local staging_directory
 
-    if [[ -d "$target_directory/.git" ]]; then
+    # -e, not -d: a submodule or worktree checkout has a .git *file*, and this
+    # function must never delete a checkout it did not create.
+    if [[ -e "$target_directory/.git" ]]; then
         printf 'Updating: %s/\n' "$target_directory"
         git -C "$target_directory" pull --ff-only --quiet || \
             printf 'Could not update winnow; keeping the existing checkout.\n' >&2
         return 0
     fi
 
+    if [[ -e "$target_directory" ]]; then
+        printf 'Not touching existing %s: it is not a git checkout, so winnow was\n' \
+            "$target_directory" >&2
+        printf 'not installed. Move it aside if you want the initializer to manage it.\n' >&2
+        return 0
+    fi
+
+    # clone to a sibling and move it into place, so a failed clone only ever
+    # removes what this function just created
     printf 'Installing: %s/\n' "$target_directory"
     mkdir -p "$(dirname "$target_directory")"
-    if ! git clone --depth 1 --quiet "$WINNOW_REPOSITORY_URL" "$target_directory"; then
-        printf 'Could not clone winnow from %s. Episode curation will be unavailable\n' \
-            "$WINNOW_REPOSITORY_URL" >&2
-        printf 'until you clone it into %s yourself.\n' "$target_directory" >&2
-        rm -rf -- "$target_directory"
+    staging_directory="$(mktemp -d "$(dirname "$target_directory")/.winnow-clone.XXXXXX")"
+    rmdir "$staging_directory"
+
+    if git clone --depth 1 --quiet "$WINNOW_REPOSITORY_URL" "$staging_directory"; then
+        mv -- "$staging_directory" "$target_directory"
+        return 0
     fi
+
+    rm -rf -- "$staging_directory"
+    printf 'Could not clone winnow from %s. Episode curation will be unavailable\n' \
+        "$WINNOW_REPOSITORY_URL" >&2
+    printf 'until you clone it into %s yourself.\n' "$target_directory" >&2
 }
 
 run_project_initialization() {
@@ -141,6 +159,12 @@ run_project_initialization() {
 
     if [[ ! -f "$source_skill_directory/SKILL.md" ]]; then
         printf 'Missing required setup skill in cloned repository: %s\n' "$source_skill_directory" >&2
+        return 1
+    fi
+
+    if [[ ! -f "$repository_directory/curation/__main__.py" ]]; then
+        printf 'Missing required directory in cloned repository: %s\n' \
+            "$repository_directory/curation" >&2
         return 1
     fi
 

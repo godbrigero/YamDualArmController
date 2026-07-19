@@ -59,10 +59,25 @@ class DecideTest(unittest.TestCase):
         self.assertIn("1211 ms gap", manifest.rejected["episode_0002"][1])
 
     def test_task_specific_detectors_are_off_by_default(self):
-        self.assertEqual(tuple(DEFAULT_DETECTORS), RIG_AGNOSTIC_DETECTORS)
+        # the sweeping-rig detectors read yellow pixels off the top camera and
+        # must not reject anything until they are asked for by name
+        for detector in TASK_SPECIFIC_DETECTORS:
+            self.assertNotIn(detector, DEFAULT_DETECTORS)
         reasons = " ".join(self.decide().rejected["episode_0003"])
         self.assertIn("truncated", reasons)
         self.assertNotIn("task_not_completed", reasons)
+
+    def test_an_episode_with_no_metrics_is_rejected_not_kept(self):
+        """The fail-closed path: ingested, detected on, but absent from the SQL.
+
+        This is what happens in production when the metrics frame and the
+        detector panel disagree about which episodes exist. An unmeasured
+        episode must never reach the Hub on the strength of no evidence.
+        """
+        metrics = [row for row in METRICS if row["episode"] != "episode_0000"]
+        manifest = decide(metrics, DETECTIONS, kept_by_query=["episode_0003"])
+        self.assertNotIn("episode_0000", manifest.kept)
+        self.assertIn("no metrics", manifest.rejected["episode_0000"][0])
 
     def test_task_specific_detectors_when_asked_for(self):
         detectors = RIG_AGNOSTIC_DETECTORS + TASK_SPECIFIC_DETECTORS
@@ -98,6 +113,16 @@ class ManifestFileTest(unittest.TestCase):
     def test_absent_manifest_reads_as_none(self):
         with tempfile.TemporaryDirectory() as src:
             self.assertIsNone(load_manifest(src))
+
+    def test_a_direct_file_path_is_read_too(self):
+        """What `convert_to_lerobot.py --curation-manifest <path>` depends on."""
+        manifest = decide(METRICS, DETECTIONS, kept_by_query=KEPT_BY_QUERY)
+        with tempfile.TemporaryDirectory() as src:
+            write_manifest(src, manifest)
+            elsewhere = Path(src) / "renamed.json"
+            Path(manifest_path(src)).rename(elsewhere)
+            self.assertEqual(load_manifest(str(elsewhere)).kept, manifest.kept)
+            self.assertIsNone(load_manifest(str(Path(src) / "missing.json")))
 
     def test_unknown_keys_do_not_break_older_manifests(self):
         with tempfile.TemporaryDirectory() as src:

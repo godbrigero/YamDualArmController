@@ -19,7 +19,10 @@ import sys
 from huggingface_hub import HfApi, upload_large_folder
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from curation.manifest import load_manifest  # noqa: E402
+try:
+    from curation.manifest import load_manifest
+except ImportError:  # copied out of the project on its own; upload still works
+    load_manifest = lambda _: None  # noqa: E731
 
 
 def report_curation(local, require):
