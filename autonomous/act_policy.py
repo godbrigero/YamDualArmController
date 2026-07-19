@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import torch
+from lerobot.common.control_utils import predict_action
 from lerobot.policies.act.modeling_act import ACTPolicy as LeRobotACTPolicy
 from lerobot.policies.factory import make_pre_post_processors
 
@@ -22,8 +25,17 @@ class ACTPolicy(AutonomousPolicy):
     }
 
     def __init__(self, checkpoint: str, device: str | None = None) -> None:
-        kwargs = {"device": device} if device else {}
-        self._policy = LeRobotACTPolicy.from_pretrained(checkpoint, **kwargs)
+        checkpoint_path = Path(checkpoint).expanduser()
+        pretrained_model = checkpoint_path / "pretrained_model"
+        if pretrained_model.is_dir():
+            checkpoint = str(pretrained_model)
+
+        self._device = torch.device(
+            device or ("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        self._policy = LeRobotACTPolicy.from_pretrained(checkpoint)
+        self._policy.to(self._device)
+        self._policy.eval()
         self._preprocessor, self._postprocessor = make_pre_post_processors(
             self._policy.config,
             pretrained_path=checkpoint,
@@ -56,21 +68,22 @@ class ACTPolicy(AutonomousPolicy):
 
     def predict(self, observation: PolicyObservation) -> np.ndarray:
         observation.validate()
-        batch: dict[str, object] = {
-            "observation.state": torch.from_numpy(
-                np.asarray(observation.state, dtype=np.float32)
-            ),
-            "task": observation.task,
+        policy_observation: dict[str, np.ndarray] = {
+            "observation.state": np.asarray(observation.state, dtype=np.float32),
         }
         for feature, role in self._feature_roles.items():
-            image = np.asarray(observation.images[role])
-            batch[feature] = torch.from_numpy(image).permute(2, 0, 1).float() / 255.0
+            policy_observation[feature] = np.asarray(observation.images[role])
 
-        processed = self._preprocessor(batch)
         with torch.inference_mode():
-            action = self._policy.select_action(processed)
-        action = self._postprocessor(action)
+            action = predict_action(
+                policy_observation,
+                self._policy,
+                self._device,
+                self._preprocessor,
+                self._postprocessor,
+                use_amp=False,
+                task=observation.task,
+            )
         if hasattr(action, "detach"):
             action = action.detach().cpu().numpy()
         return _validate_action(action)
-
