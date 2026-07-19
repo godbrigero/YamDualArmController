@@ -21,7 +21,8 @@ python convert_to_lerobot.py --src episodes/<dataset> --repo-id <user>/<name> [-
 | `--repo-id` | required |
 | `--fps` | `15` |
 | `--task` | `bimanual teleoperation` |
-| `--robot-type` | `yam_bimanual_so101_leader` |
+| `--format` | `act` (`molmoact2` renames the wrist streams for MolmoAct2 fine-tuning) |
+| `--robot-type` | depends on `--format`: `yam_bimanual_so101_leader` / `bi_yam_follower` |
 | `--limit` | `0` (all episodes) |
 
 Resolution is read from the first episode's `top.mp4`, so every episode in a
@@ -36,6 +37,16 @@ Three video streams — `observation.images.top`, `observation.images.wrist_1`,
 That naming is the contract between the recorder's column order and the trained
 policy. If you change which channel is recorded first, this schema is what has
 to change with it.
+
+With `--format molmoact2` the video streams become `observation.images.top`,
+`observation.images.left`, `observation.images.right` (`wrist_2` → `left`,
+`wrist_1` → `right`) and `robot_type` defaults to `bi_yam_follower` — the
+schema the `yam_fold` fine-tuning mixture and the
+`allenai/MolmoAct2-BimanualYAM` checkpoint expect. The state/action layout is
+unchanged. This bakes in the rig's wiring: `wrist_1` films the right (`can1`)
+arm and `wrist_2` the left (`can0`) arm. If a rig is ever cabled the other way,
+fix the camera serial assignment at recording time rather than editing the key
+mapping.
 
 {% capture body %}
 Use `--limit 2` for the first run on a new rig. It converts two episodes in

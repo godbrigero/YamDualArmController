@@ -2,7 +2,8 @@
 
 Bimanual teleoperation of **i2rt YAM** arms with **SO-101** leader arms, a live
 **Rerun** camera dashboard, a one-click web **control panel**, and an
-**episode-recording → LeRobot dataset → ACT training** pipeline.
+**episode-recording → LeRobot dataset → training** pipeline that feeds either
+ACT (local `lerobot-train`) or MolmoAct2 fine-tuning (`molmoact2/`).
 
 Built for a hackathon on top of [`i2rt`](https://github.com/i2rt-robotics/i2rt)
 (YAM arms, DM motors over CAN) and [LeRobot](https://github.com/huggingface/lerobot)
@@ -46,7 +47,8 @@ SO-101 leaders (Feetech STS3215, USB) ──► YAM followers (DM motors, CAN)
         └── joint-space mapping (per-leader calibration by controller serial)
 RealSense cameras (top + 2 wrists) ──► Rerun web dashboard
 Control panel (:8080) ── one-click connect / teleop / record episodes
-Episodes ──► LeRobotDataset ──► lerobot-train (ACT) ──► deploy
+Episodes ──► LeRobotDataset ──► lerobot-train (ACT)              ──► python -m autonomous --policy act
+                            └─► modal_train.py (MolmoAct2 LoRA)  ──► python -m autonomous --policy vla
 ```
 
 ## Autonomous control
@@ -107,6 +109,38 @@ ID instead. To use a conventional GPU VM rather than Modal, run
 `python -m autonomous.vla_server` and pass its full
 `http://HOST:8000/predict` URL to the robot.
 
+### Fine-tuning MolmoAct2 on your own recordings
+
+Episodes recorded here can fine-tune `allenai/MolmoAct2-BimanualYAM` end to
+end. Convert with `--format molmoact2` — it emits the camera keys
+(`observation.images.{top,left,right}`) and `robot_type` (`bi_yam_follower`)
+the `yam_fold` training mixture expects; the 14-D state/action layout already
+matches:
+
+```bash
+# 1. Convert + upload in the MolmoAct2 schema (lerobot env)
+python convert_to_lerobot.py --src episodes/<dataset> --repo-id <user>/<name> \
+    --format molmoact2 --task "fold the towel in half" --push
+
+# 2. Fine-tune on Modal (from molmoact2/; smoke-test first)
+cd molmoact2
+MODAL_TRAIN_GPUS=1 modal run experiments/modal_train.py --smoke
+modal run experiments/modal_train.py --exp-name my-yam-policy \
+    --dataset-repo-id <user>/<name>
+
+# 3. Merge the LoRA adapters (experiments/scripts/merge_lora.py), convert to
+#    HF format (experiments/olmo/hf_model/convert_molmoact2_to_hf.py), then
+#    deploy the converted checkpoint:
+YAM_VLA_VOLUME='molmoact2-yam-fold' \
+YAM_VLA_MODEL='/models/checkpoints/my-yam-policy-merged' \
+uvx --from modal modal deploy autonomous/modal_vla.py
+```
+
+Caveat: the base checkpoint was trained on 30 FPS data and emits 30-step
+action chunks; this pipeline records at 15 FPS, so a chunk spans 2 s instead
+of 1 s. Fine-tuning re-teaches the temporal scale, but record at 30 FPS if you
+want to stay close to the base checkpoint's dynamics.
+
 Keep a hand on the emergency stop and validate new checkpoints with dry runs.
 The runner rejects malformed/non-finite actions, velocity-limits every command,
 and returns both arms to gravity-comp idle on exit. MolmoAct2 expects the exact
@@ -124,7 +158,7 @@ camera order top, left, right and uses continuous actions with
 | `check_leader.py` | Quick single-leader health check (USB detection, servo power/stability, motion-corruption test). |
 | `check_cameras.py` | Snapshot each RealSense camera to verify it works / identify which is which. |
 | `episode_writer.py` | Dependency-light episode format: one `mp4` per camera + `npz` of state/action/timestamps, under `episodes/<dataset>/episode_XXXX/`. |
-| `convert_to_lerobot.py` | Convert `episodes/<dataset>/` → a `LeRobotDataset` (ACT-ready) and optionally push to the HF Hub. |
+| `convert_to_lerobot.py` | Convert `episodes/<dataset>/` → a `LeRobotDataset` and optionally push to the HF Hub. `--format act` (default) for the ACT pipeline; `--format molmoact2` for MolmoAct2 fine-tuning (renames wrist streams: `wrist_2`→`left`, `wrist_1`→`right`; sets `robot_type: bi_yam_follower`). |
 | `push_dataset.py` | Resumable HF upload of a local LeRobotDataset (uses `hf_transfer` for speed). |
 | `outputs/mission_hacks_calibrations.json` | Zero-based YAM ranges plus per-controller servo IDs, output ranges, mappings, signs, and fixed joints used by the bridge API. |
 
@@ -160,6 +194,9 @@ HF_HUB_ENABLE_HF_TRANSFER=1 lerobot-train \
     --dataset.repo_id=<user>/<name> --policy.type=act --policy.device=cuda \
     --policy.push_to_hub=false --batch_size=8 --steps=50000 --output_dir=outputs/act
 ```
+
+To fine-tune MolmoAct2 instead of ACT, convert with `--format molmoact2` and
+follow [Fine-tuning MolmoAct2 on your own recordings](#fine-tuning-molmoact2-on-your-own-recordings).
 
 ## Hardware notes
 

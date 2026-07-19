@@ -4,6 +4,11 @@
 Run with the conda lerobot python:
     /home/shiv/miniforge3/envs/lerobot/bin/python convert_to_lerobot.py \
         --src episodes/default --repo-id Shivakumr/yam_default [--limit 2] [--push] [--private]
+
+--format act (default) keeps the wrist_1/wrist_2 camera keys used by the ACT
+pipeline; --format molmoact2 emits observation.images.{top,left,right} and
+robot_type bi_yam_follower for MolmoAct2 fine-tuning (yam_fold mixture in
+molmoact2/experiments/launch_scripts/data_mixtures.py).
 """
 import argparse
 import glob
@@ -15,15 +20,24 @@ import numpy as np
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 CAMS = ["top", "wrist_1", "wrist_2"]
+# dataset camera keys per output format; source mp4 names are always CAMS.
+# molmoact2: the yam_fold mixture and the BimanualYAM checkpoint's norm stats
+# expect observation.images.{top,left,right}. On this rig wrist_1 films the
+# right (can1) arm and wrist_2 the left (can0) arm.
+CAM_KEYS = {
+    "act": {"top": "top", "wrist_1": "wrist_1", "wrist_2": "wrist_2"},
+    "molmoact2": {"top": "top", "wrist_1": "right", "wrist_2": "left"},
+}
+ROBOT_TYPES = {"act": "yam_bimanual_so101_leader", "molmoact2": "bi_yam_follower"}
 # state/action layout: recorder concatenates can0 then can1, each 6 joints + gripper
 STATE_NAMES = [f"{ch}_{j}" for ch in ("can0", "can1")
                for j in ("j1", "j2", "j3", "j4", "j5", "j6", "gripper")]
 
 
-def build_features(h, w):
+def build_features(h, w, cam_keys):
     feats = {}
     for c in CAMS:
-        feats[f"observation.images.{c}"] = {
+        feats[f"observation.images.{cam_keys[c]}"] = {
             "dtype": "video", "shape": (h, w, 3),
             "names": ["height", "width", "channels"],
         }
@@ -38,12 +52,17 @@ def main():
     ap.add_argument("--repo-id", required=True)
     ap.add_argument("--fps", type=int, default=15)
     ap.add_argument("--task", default="bimanual teleoperation")
-    ap.add_argument("--robot-type", default="yam_bimanual_so101_leader")
+    ap.add_argument("--format", choices=sorted(CAM_KEYS), default="act",
+                    help="dataset schema: act (wrist_1/wrist_2 keys) or molmoact2 (left/right keys for the yam_fold fine-tune mixture)")
+    ap.add_argument("--robot-type", default=None,
+                    help="override robot_type (default depends on --format)")
     ap.add_argument("--limit", type=int, default=0, help="only convert first N episodes (0 = all)")
     ap.add_argument("--episodes", default="", help="only these episode indices, e.g. 7,8,12-19")
     ap.add_argument("--push", action="store_true")
     ap.add_argument("--private", action="store_true")
     args = ap.parse_args()
+    cam_keys = CAM_KEYS[args.format]
+    robot_type = args.robot_type or ROBOT_TYPES[args.format]
 
     eps = sorted(glob.glob(os.path.join(args.src, "episode_*")))
     if args.episodes:
@@ -77,8 +96,8 @@ def main():
         shutil.rmtree(root)
 
     ds = LeRobotDataset.create(
-        repo_id=args.repo_id, fps=args.fps, features=build_features(h, w),
-        robot_type=args.robot_type, use_videos=True,
+        repo_id=args.repo_id, fps=args.fps, features=build_features(h, w, cam_keys),
+        robot_type=robot_type, use_videos=True,
     )
 
     for ei, ep in enumerate(eps):
@@ -102,7 +121,7 @@ def main():
                      "observation.state": state[i].astype(np.float32),
                      "action": action[i].astype(np.float32)}
             for c in CAMS:
-                frame[f"observation.images.{c}"] = imgs[c]
+                frame[f"observation.images.{cam_keys[c]}"] = imgs[c]
             ds.add_frame(frame)
             written += 1
         for cap in caps.values():
@@ -115,7 +134,7 @@ def main():
 
     if args.push:
         print(f"pushing to HF hub as {args.repo_id} (private={args.private})...")
-        ds.push_to_hub(private=args.private, tags=["yam", "so101", "act", "bimanual"])
+        ds.push_to_hub(private=args.private, tags=["yam", "so101", args.format, "bimanual"])
         print(f"pushed: https://huggingface.co/datasets/{args.repo_id}")
 
 
