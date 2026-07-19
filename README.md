@@ -8,6 +8,36 @@ Built for a hackathon on top of [`i2rt`](https://github.com/i2rt-robotics/i2rt)
 (YAM arms, DM motors over CAN) and [LeRobot](https://github.com/huggingface/lerobot)
 (ACT policy + dataset format).
 
+## Documentation
+
+**📖 [Full documentation →](https://godbrigero.github.io/YamDualArmController/)**
+
+Set up, calibrate, verify the mapping, drive the arms, record, and train — every
+error the code raises, with the fix. Source lives in [`docs/`](docs/).
+
+### Fastest path: let the agent do it
+
+```
+/connect-yam-leader        # Claude Code
+$connect-yam-leader        # Codex
+```
+
+The repository ships an agent skill ([`skills/connect-yam-leader/`](skills/connect-yam-leader/))
+that runs the whole setup — hardware discovery, calibration, mapping validation,
+and a safe first teleop — and diagnoses failures against the exact errors the
+code raises. The initializer installs it into both `.claude/skills/` and
+`.agents/skills/`, so it's available the moment setup finishes. It never starts
+teleoperation on its own.
+
+## Install
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/godbrigero/YamDualArmController/main/scripts/initialize_new_project.bash)"
+```
+
+Run it from inside the directory you want the project in — it installs into
+`$PWD`. Requires [uv](https://docs.astral.sh/uv/getting-started/installation/).
+
 ## System
 
 ```
@@ -106,22 +136,26 @@ camera order top, left, right and uses continuous actions with
 
 ## Quickstart
 
-After running `scripts/initialize_new_project.bash`, invoke `$connect-yam-leader`
-in Codex or `/connect-yam-leader` in Claude Code for the guided setup and
-troubleshooting workflow.
+After installing, invoke `/connect-yam-leader` (Claude Code) or
+`$connect-yam-leader` (Codex) for the guided setup and troubleshooting workflow,
+or follow the steps below. Each one is a chapter in the
+[documentation](https://godbrigero.github.io/YamDualArmController/).
 
 ```bash
 # 1. Calibrate the leader arms (once per arm)
 uv run scripts/calibrate.py
 
-# 2. Launch the control panel  →  open http://localhost:8080
+# 2. Start teleoperation — one pair first
+uv run -m teleoperation --ports /dev/serial/by-id/<leader-id> --yam-arm-cans can0
+
+# 3. Launch the control panel to record  →  open http://localhost:8080
 python control_panel.py
 #   - Connect (cameras) → Start Teleop → record episodes into named datasets
 
-# 3. Convert recorded episodes to a LeRobot dataset (in the lerobot env)
+# 4. Convert recorded episodes to a LeRobot dataset (in the lerobot env)
 python convert_to_lerobot.py --src episodes/<dataset> --repo-id <user>/<name> [--push]
 
-# 4. Train ACT locally
+# 5. Train ACT locally
 HF_HUB_ENABLE_HF_TRANSFER=1 lerobot-train \
     --dataset.repo_id=<user>/<name> --policy.type=act --policy.device=cuda \
     --policy.push_to_hub=false --batch_size=8 --steps=50000 --output_dir=outputs/act

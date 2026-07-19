@@ -1,0 +1,75 @@
+name: Deploy docs to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let an in-flight deploy finish; queue at most one more.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # The Anodize theme lives in its own repository so it stays reusable.
+      # docs/Gemfile reads ANODIZE_PATH to find it.
+      - name: Check out the Anodize theme
+        uses: actions/checkout@v4
+        with:
+          repository: AdamEXu/jekyll-theme-anodize
+          ref: main
+          path: docs/.theme
+
+      # No bundler-cache: docs/Gemfile.lock is not committed, because the theme
+      # is a path gem whose location differs between a local checkout and CI.
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install gems
+        working-directory: docs
+        env:
+          ANODIZE_PATH: .theme
+        run: bundle install --jobs 4 --retry 3
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Build the site
+        working-directory: docs
+        env:
+          ANODIZE_PATH: .theme
+          JEKYLL_ENV: production
+        run: bundle exec jekyll build --baseurl "${{ steps.pages.outputs.base_path }}"
+
+      - name: Upload the artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

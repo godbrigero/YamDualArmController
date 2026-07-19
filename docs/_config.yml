@@ -1,0 +1,73 @@
+title: YAM Dual-Arm Controller
+tagline: Teleop, recording, and ACT training for bimanual YAM arms
+description: >-
+  Bimanual teleoperation of i2rt YAM arms with SO-101 leaders, a live Rerun
+  camera dashboard, and an episode-recording → LeRobot → ACT training pipeline.
+lang: en
+
+# GitHub Pages serves this folder; keep baseurl matching the repo name if you
+# publish to <user>.github.io/<repo>.
+baseurl: "/YamDualArmController"
+url: ""
+
+# Local development uses the theme checkout next door (see Gemfile).
+# Once the theme repo is pushed to GitHub, swap to:
+#   remote_theme: adamexu/jekyll-theme-anodize
+#   plugins: [jekyll-remote-theme, ...]
+theme: jekyll-theme-anodize
+
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+collections:
+  docs:
+    output: true
+    permalink: /docs/:path/
+
+defaults:
+  - scope: { path: "", type: "docs" }
+    values: { layout: doc }
+  - scope: { path: "" }
+    values: { layout: page }
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+sass:
+  style: compressed
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+
+anodize:
+  sections:
+    - Set up
+    - Drive
+    - Collect
+
+  owner: YAM Dual-Arm Controller
+  github: https://github.com/godbrigero/YamDualArmController
+  web_fonts: true
+
+  nav:
+    - title: Documentation
+      url: /docs/install/
+    - title: Repository
+      url: https://github.com/godbrigero/YamDualArmController
+      external: true
+
+  cta:
+    text: Get started
+    url: /docs/install/
+
+  footer_links:
+    - title: GitHub
+      url: https://github.com/godbrigero/YamDualArmController
+      icon: github
+      external: true

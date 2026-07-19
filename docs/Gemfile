@@ -1,0 +1,12 @@
+source "https://rubygems.org"
+
+# The Anodize theme lives in its own repository so it stays reusable across
+# projects. Locally it resolves to a sibling checkout; in CI the workflow checks
+# the theme out into docs/.theme and sets ANODIZE_PATH to point at it.
+gem "jekyll-theme-anodize", path: ENV.fetch("ANODIZE_PATH", "../../jekyll-theme-anodize")
+
+gem "jekyll", "~> 4.3"
+gem "jekyll-feed"
+gem "jekyll-seo-tag"
+gem "jekyll-sitemap"
+gem "webrick", "~> 1.8"
