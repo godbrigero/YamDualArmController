@@ -19,6 +19,70 @@ Control panel (:8080) ── one-click connect / teleop / record episodes
 Episodes ──► LeRobotDataset ──► lerobot-train (ACT) ──► deploy
 ```
 
+## Autonomous control
+
+The autonomous runner uses the same observation/action layout as the `_v1`
+dataset pipeline: left (`can0`) then right (`can1`), with six joints and one
+gripper value per arm. Camera capture also matches the dataset defaults: RGB at
+424x240 and 15 FPS. Pass camera serial numbers explicitly so their physical
+roles cannot be accidentally reordered.
+
+Run a trained LeRobot ACT checkpoint locally (omit `--execute` for a safe dry
+run that prints actions):
+
+```bash
+python -m autonomous \
+  --policy act --checkpoint outputs/act/checkpoints/last/pretrained_model \
+  --task "put the cup in the bowl" \
+  --left-arm-can can0 --right-arm-can can1 \
+  --top TOP_SERIAL --left LEFT_SERIAL --right RIGHT_SERIAL \
+  --execute
+```
+
+For MolmoAct2, Modal is the easiest deployment path. Install/configure the Modal
+CLI, create a proxy token, then deploy the included endpoint. Modal prints the
+prediction URL; use that exact URL as `--vla-url`.
+
+```bash
+# Development machine (once)
+uvx --from modal modal setup
+uvx --from modal modal workspace proxy-tokens create
+
+# Deploy the public BimanualYAM checkpoint. Weights are cached in a Modal Volume.
+uvx --from modal modal deploy autonomous/modal_vla.py
+
+# Robot computer
+export MODAL_PROXY_TOKEN_ID='wk-...'
+export MODAL_PROXY_TOKEN_SECRET='ws-...'
+python -m autonomous \
+  --policy vla --vla-url 'https://YOUR-PREDICT-URL.modal.run' \
+  --task "put the cup in the bowl" \
+  --left-arm-can can0 --right-arm-can can1 \
+  --top TOP_SERIAL --left LEFT_SERIAL --right RIGHT_SERIAL \
+  --execute
+```
+
+If training saved a fine-tuned checkpoint in an existing Modal Volume, mount
+that Volume and point the deployment at its directory (the path is relative to
+the Volume but appears under `/models` in the inference container):
+
+```bash
+YAM_VLA_VOLUME='my-training-volume' \
+YAM_VLA_MODEL='/models/checkpoints/my-yam-policy' \
+uvx --from modal modal deploy autonomous/modal_vla.py
+```
+
+For a fine-tune pushed to Hugging Face, set `YAM_VLA_MODEL` to its repository
+ID instead. To use a conventional GPU VM rather than Modal, run
+`python -m autonomous.vla_server` and pass its full
+`http://HOST:8000/predict` URL to the robot.
+
+Keep a hand on the emergency stop and validate new checkpoints with dry runs.
+The runner rejects malformed/non-finite actions, velocity-limits every command,
+and returns both arms to gravity-comp idle on exit. MolmoAct2 expects the exact
+camera order top, left, right and uses continuous actions with
+`yam_dual_molmoact2` normalization.
+
 ## Components
 
 | File | What it does |

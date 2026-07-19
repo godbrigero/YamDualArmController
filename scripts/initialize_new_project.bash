@@ -88,37 +88,16 @@ sync_managed_directory() {
     cp -R "$source_directory/." "$target_directory/"
 }
 
-install_seed_file() {
-    local source_file=$1
-    local target_file=$2
-
-    if [[ -d "$target_file" ]]; then
-        printf 'Cannot install seed file because the target is a directory: %s\n' "$target_file" >&2
-        return 1
-    fi
-
-    if [[ -e "$target_file" ]]; then
-        printf 'Preserving existing user file: %s\n' "$target_file"
-        return
-    fi
-
-    printf 'Installing seed: %s\n' "$target_file"
-    mkdir -p "$(dirname "$target_file")"
-    cp -p "$source_file" "$target_file"
-}
-
 run_project_initialization() {
     local repository_directory=$1
     local project_directory=$2
     local source_calibration_script="$repository_directory/scripts/calibrate.py"
     local source_bridge_directory="$repository_directory/leader_yam_bridge"
     local source_teleoperation_directory="$repository_directory/teleoperation"
-    local source_config_file="$repository_directory/outputs/mission_hacks_calibrations.json"
     local source_skill_directory="$repository_directory/skills/connect-yam-leader"
     local target_scripts_directory="$project_directory/scripts"
     local target_bridge_directory="$project_directory/leader_yam_bridge"
     local target_teleoperation_directory="$project_directory/teleoperation"
-    local target_config_file="$project_directory/outputs/mission_hacks_calibrations.json"
 
     if [[ ! -f "$source_calibration_script" ]]; then
         printf 'Missing required file in cloned repository: %s\n' "$source_calibration_script" >&2
@@ -135,11 +114,6 @@ run_project_initialization() {
         return 1
     fi
 
-    if [[ ! -f "$source_config_file" ]]; then
-        printf 'Missing required seed configuration in cloned repository: %s\n' "$source_config_file" >&2
-        return 1
-    fi
-
     if [[ ! -f "$source_skill_directory/SKILL.md" ]]; then
         printf 'Missing required setup skill in cloned repository: %s\n' "$source_skill_directory" >&2
         return 1
@@ -150,11 +124,54 @@ run_project_initialization() {
     sync_managed_directory "$source_teleoperation_directory" "$target_teleoperation_directory"
     sync_managed_directory "$source_skill_directory" "$project_directory/.agents/skills/connect-yam-leader"
     sync_managed_directory "$source_skill_directory" "$project_directory/.claude/skills/connect-yam-leader"
-    install_seed_file "$source_config_file" "$target_config_file"
+
+    if [[ -d "$project_directory/outputs" ]]; then
+        printf 'Preserving existing calibration output directory: %s/\n' "$project_directory/outputs"
+    else
+        printf 'Creating empty calibration output directory: %s/\n' "$project_directory/outputs"
+        mkdir -p "$project_directory/outputs"
+    fi
+}
+
+ensure_ruckig_build_constraint() {
+    local project_directory=$1
+    local pyproject_file="$project_directory/pyproject.toml"
+    local updated_pyproject_file
+
+    if grep -Eq '^[[:space:]]*build-constraint-dependencies[[:space:]]*=' "$pyproject_file"; then
+        return
+    fi
+
+    updated_pyproject_file="$(mktemp "$project_directory/.yam-pyproject.XXXXXX")"
+    cp -p "$pyproject_file" "$updated_pyproject_file"
+
+    if ! awk '
+        BEGIN { added = 0 }
+        /^[[:space:]]*\[tool\.uv\][[:space:]]*(#.*)?$/ && !added {
+            print
+            print "build-constraint-dependencies = [\"scikit-build-core<0.10\"]"
+            added = 1
+            next
+        }
+        { print }
+        END {
+            if (!added) {
+                print ""
+                print "[tool.uv]"
+                print "build-constraint-dependencies = [\"scikit-build-core<0.10\"]"
+            }
+        }
+    ' "$pyproject_file" >"$updated_pyproject_file"; then
+        rm -f -- "$updated_pyproject_file"
+        return 1
+    fi
+
+    mv -- "$updated_pyproject_file" "$pyproject_file"
 }
 
 configure_uv_project() {
     local project_directory=$1
+    local build_constraints_file="$temporary_directory/ruckig-build-constraints.txt"
 
     printf 'Configuring UV project dependencies...\n'
 
@@ -167,9 +184,14 @@ configure_uv_project() {
             "$project_directory"
     fi
 
+    # Ruckig 0.15.3 still uses the pre-0.10 scikit-build-core setting name
+    # `cmake.targets`. Newer build backends reject it before compilation.
+    ensure_ruckig_build_constraint "$project_directory"
+    printf 'scikit-build-core<0.10\n' >"$build_constraints_file"
+
     (
         cd "$project_directory"
-        "$uv_executable" add \
+        UV_BUILD_CONSTRAINT="$build_constraints_file" "$uv_executable" add \
             --no-workspace \
             --upgrade-package numpy \
             --upgrade-package feetech-servo-sdk \
@@ -188,19 +210,14 @@ show_calibration_prompt() {
         return
     fi
 
-    if command -v osascript >/dev/null 2>&1; then
-        osascript -e 'display dialog "Project setup is complete." & return & return & "Codex: $connect-yam-leader" & return & "Claude Code: /connect-yam-leader" & return & return & "First run: uv run scripts/calibrate.py" & return & "Then run: uv run -m teleoperation" with title "YAM Project Setup" buttons {"OK"} default button "OK" with icon note'
-    elif command -v zenity >/dev/null 2>&1; then
-        zenity --info --title='YAM Project Setup' --ok-label='OK' --text="$message"
-    elif command -v kdialog >/dev/null 2>&1; then
-        kdialog --title 'YAM Project Setup' --msgbox "$message"
-    elif command -v whiptail >/dev/null 2>&1; then
+    if command -v whiptail >/dev/null 2>&1; then
         whiptail --title 'YAM Project Setup' --msgbox "$message" 12 72
     elif command -v dialog >/dev/null 2>&1; then
         dialog --title 'YAM Project Setup' --msgbox "$message" 12 72
     elif [[ -t 0 && -t 1 ]]; then
-        printf '\n%s\n\n' "$message"
-        read -r -p 'Press Enter to select [ OK ]... ' _
+        printf '\nYAM Project Setup\n\n%s\n\n' "$message"
+        printf '                \033[7m  OK  \033[0m\n'
+        read -r -p 'Press Enter to select OK... ' _
     else
         printf '\n%s\n' "$message"
     fi

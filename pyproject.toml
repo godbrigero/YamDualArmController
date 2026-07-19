@@ -11,10 +11,12 @@ dependencies = [
     "huggingface-hub",
     "i2rt @ git+https://github.com/i2rt-robotics/i2rt.git",
     "lerobot[dataset,training]",
+    "modal>=1.5.2",
     "numpy",
     "opencv-python-headless>=4.9,<5",
     "pyrealsense2; sys_platform != 'darwin'",
     "rerun-sdk",
+    "transformers>=5.14.1",
 ]
 
 [tool.uv]
