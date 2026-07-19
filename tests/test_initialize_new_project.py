@@ -9,11 +9,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 INITIALIZER = ROOT / "scripts" / "initialize_new_project.bash"
 SKILL = ROOT / "skills" / "connect-yam-leader"
-CONFIG = ROOT / "outputs" / "mission_hacks_calibrations.json"
 WINNOW = ROOT / "third_party" / "winnow"
 
 
 class InitializeNewProjectTest(unittest.TestCase):
+    def setUp(self) -> None:
+        # the initializer clones winnow from WINNOW below; without the submodule
+        # checked out that clone fails silently and the assertions get cryptic
+        self.assertTrue(
+            (WINNOW / "winnow" / "catalog.py").is_file(),
+            "winnow submodule missing — run: git submodule update --init third_party/winnow",
+        )
+
     def initialize(self, target: Path) -> None:
         # clone winnow from the submodule already on disk rather than from GitHub,
         # so the test neither needs the network nor depends on winnow's main branch
@@ -45,10 +52,9 @@ class InitializeNewProjectTest(unittest.TestCase):
             self.assertTrue((target / "teleoperation/__main__.py").is_file())
             self.assertTrue((target / "curation/__main__.py").is_file())
             self.assertTrue((target / "third_party/winnow/winnow/catalog.py").is_file())
-            self.assertEqual(
-                (target / "outputs/mission_hacks_calibrations.json").read_bytes(),
-                CONFIG.read_bytes(),
-            )
+            # calibration is rig-specific, so the initializer makes the directory
+            # for it and leaves the file to `scripts/calibrate.py`
+            self.assertTrue((target / "outputs").is_dir())
 
             for agent_directory in (".agents", ".claude"):
                 installed = (
