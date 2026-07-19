@@ -4,7 +4,7 @@ subtitle: Episodes from teleop
 section: Collect
 order: 1
 next_teaser: >-
-  episodes are on disk. The next chapter turns them into a training dataset.
+  episodes are on disk. The next chapter works out which of them are any good.
 ---
 
 Recording captures what you drive: the follower's measured joint positions, the

@@ -2,7 +2,7 @@
 title: Convert
 subtitle: Episodes to a LeRobot dataset
 section: Collect
-order: 2
+order: 3
 next_teaser: >-
   the dataset is ACT-ready. The last chapter trains on it.
 ---
@@ -24,9 +24,27 @@ python convert_to_lerobot.py --src episodes/<dataset> --repo-id <user>/<name> [-
 | `--format` | `act` (`molmoact2` renames the wrist streams for MolmoAct2 fine-tuning) |
 | `--robot-type` | depends on `--format`: `yam_bimanual_so101_leader` / `bi_yam_follower` |
 | `--limit` | `0` (all episodes) |
+| `--curation` | `auto` (`require` / `off`) |
+| `--curation-manifest` | `<src>/curation.json` |
 
 Resolution is read from the first episode's `top.mp4`, so every episode in a
 dataset must share one camera configuration.
+
+## Only the episodes that survived triage
+
+If [curation](/docs/curate/) has run over the source directory, conversion reads
+its `curation.json` and skips everything it rejected, naming each one and why:
+
+```text
+curation (episodes/sweep/curation.json): kept 7 of 10 episodes
+  query: pct_dropped < 40 AND worst_gap_ms < 500
+  skipping episode_0007: capture_stall: a 1200 ms gap with no data recorded at all
+```
+
+The manifest is then copied into the dataset directory, so it is uploaded with
+everything else and the Hub records which recordings the policy saw. Without a
+manifest, `auto` converts everything and says so; `--curation require` refuses
+to run at all, which is the setting to use in anything automated.
 
 ## The feature schema
 
@@ -62,8 +80,12 @@ bad connection, do it separately — `push_dataset.py` resumes an existing local
 dataset:
 
 ```bash
-HF_HUB_ENABLE_HF_TRANSFER=1 python push_dataset.py --repo-id <user>/<name> [--private] [--local <path>]
+HF_HUB_ENABLE_HF_TRANSFER=1 python push_dataset.py --repo-id <user>/<name> \
+    [--private] [--local <path>] [--require-curation]
 ```
+
+It prints the curation manifest it found before uploading;
+`--require-curation` turns a missing one from a warning into a refusal.
 
 The local dataset lives under `~/.cache/huggingface/lerobot/<repo-id>`.
 

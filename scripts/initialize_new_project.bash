@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 readonly REPOSITORY_URL="${YAM_INITIALIZER_REPOSITORY_URL:-https://github.com/godbrigero/YamDualArmController.git}"
+readonly WINNOW_REPOSITORY_URL="${YAM_INITIALIZER_WINNOW_URL:-https://github.com/AdamEXu/winnow.git}"
 readonly PROJECT_DIRECTORY="$PWD"
 
 temporary_directory=""
@@ -88,6 +89,30 @@ sync_managed_directory() {
     cp -R "$source_directory/." "$target_directory/"
 }
 
+# Episode triage lives in a separate repository with its own pinned environment,
+# so it is cloned beside the project rather than vendored into it. Curation is
+# optional — a clone failure must not take the whole setup down with it.
+install_winnow() {
+    local project_directory=$1
+    local target_directory="$project_directory/third_party/winnow"
+
+    if [[ -d "$target_directory/.git" ]]; then
+        printf 'Updating: %s/\n' "$target_directory"
+        git -C "$target_directory" pull --ff-only --quiet || \
+            printf 'Could not update winnow; keeping the existing checkout.\n' >&2
+        return 0
+    fi
+
+    printf 'Installing: %s/\n' "$target_directory"
+    mkdir -p "$(dirname "$target_directory")"
+    if ! git clone --depth 1 --quiet "$WINNOW_REPOSITORY_URL" "$target_directory"; then
+        printf 'Could not clone winnow from %s. Episode curation will be unavailable\n' \
+            "$WINNOW_REPOSITORY_URL" >&2
+        printf 'until you clone it into %s yourself.\n' "$target_directory" >&2
+        rm -rf -- "$target_directory"
+    fi
+}
+
 run_project_initialization() {
     local repository_directory=$1
     local project_directory=$2
@@ -122,6 +147,8 @@ run_project_initialization() {
     sync_managed_file "$source_calibration_script" "$target_scripts_directory/calibrate.py"
     sync_managed_directory "$source_bridge_directory" "$target_bridge_directory"
     sync_managed_directory "$source_teleoperation_directory" "$target_teleoperation_directory"
+    sync_managed_directory "$repository_directory/curation" "$project_directory/curation"
+    install_winnow "$project_directory"
     sync_managed_directory "$source_skill_directory" "$project_directory/.agents/skills/connect-yam-leader"
     sync_managed_directory "$source_skill_directory" "$project_directory/.claude/skills/connect-yam-leader"
 

@@ -6,11 +6,35 @@ Safe to re-run — it skips already-uploaded files and continues.
 
     /home/shiv/miniforge3/envs/lerobot/bin/python push_dataset.py \
         --repo-id Shivakumr/yams [--private]
+
+The dataset it uploads is whatever conversion produced, so curation happens
+upstream in `convert_to_lerobot.py`. This script reports the `curation.json`
+conversion left behind, and `--require-curation` refuses to publish a dataset
+that was never triaged.
 """
 import argparse
 import os
+import sys
 
 from huggingface_hub import HfApi, upload_large_folder
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from curation.manifest import load_manifest  # noqa: E402
+
+
+def report_curation(local, require):
+    manifest = load_manifest(local)
+    if manifest is None:
+        message = (f"{local} carries no curation.json — every recorded episode is in it, "
+                   "including any the detectors would have rejected.\n"
+                   "  uv run -m curation --src episodes/<dataset>   # then re-convert")
+        if require:
+            raise SystemExit(f"refusing to push: {message}")
+        print(f"warning: {message}", flush=True)
+        return
+    print(f"curated dataset: {manifest.summary()} (query: {manifest.query})", flush=True)
+    if manifest.rejected:
+        print("  excluded: " + ", ".join(sorted(manifest.rejected)), flush=True)
 
 
 def main():
@@ -18,11 +42,15 @@ def main():
     ap.add_argument("--repo-id", required=True)
     ap.add_argument("--private", action="store_true")
     ap.add_argument("--local", default=None)
+    ap.add_argument("--require-curation", action="store_true",
+                    help="refuse to push a dataset that was built without triage")
     args = ap.parse_args()
 
     local = args.local or os.path.expanduser(f"~/.cache/huggingface/lerobot/{args.repo_id}")
     if not os.path.isdir(local):
         raise SystemExit(f"local dataset not found: {local}")
+
+    report_curation(local, args.require_curation)
 
     api = HfApi()
     api.create_repo(args.repo_id, repo_type="dataset", exist_ok=True, private=args.private)

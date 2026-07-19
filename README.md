@@ -47,8 +47,8 @@ SO-101 leaders (Feetech STS3215, USB) ──► YAM followers (DM motors, CAN)
         └── joint-space mapping (per-leader calibration by controller serial)
 RealSense cameras (top + 2 wrists) ──► Rerun web dashboard
 Control panel (:8080) ── one-click connect / teleop / record episodes
-Episodes ──► LeRobotDataset ──► lerobot-train (ACT)              ──► python -m autonomous --policy act
-                            └─► modal_train.py (MolmoAct2 LoRA)  ──► python -m autonomous --policy vla
+Episodes ──► winnow triage (Rerun) ──► LeRobotDataset ──► lerobot-train (ACT)              ──► python -m autonomous --policy act
+                                                      └─► modal_train.py (MolmoAct2 LoRA)  ──► python -m autonomous --policy vla
 ```
 
 ## Autonomous control
@@ -158,8 +158,9 @@ camera order top, left, right and uses continuous actions with
 | `check_leader.py` | Quick single-leader health check (USB detection, servo power/stability, motion-corruption test). |
 | `check_cameras.py` | Snapshot each RealSense camera to verify it works / identify which is which. |
 | `episode_writer.py` | Dependency-light episode format: one `mp4` per camera + `npz` of state/action/timestamps, under `episodes/<dataset>/episode_XXXX/`. |
-| `convert_to_lerobot.py` | Convert `episodes/<dataset>/` → a `LeRobotDataset` and optionally push to the HF Hub. `--format act` (default) for the ACT pipeline; `--format molmoact2` for MolmoAct2 fine-tuning (renames wrist streams: `wrist_2`→`left`, `wrist_1`→`right`; sets `robot_type: bi_yam_follower`). |
-| `push_dataset.py` | Resumable HF upload of a local LeRobotDataset (uses `hf_transfer` for speed). |
+| `curation/` | Episode triage via [winnow](https://github.com/AdamEXu/winnow) (submodule): ingests the corpus into Rerun, reduces it to one row per episode in SQL, and writes `curation.json` — the kept episodes and a reason for every rejection. |
+| `convert_to_lerobot.py` | Convert `episodes/<dataset>/` → a `LeRobotDataset` and optionally push to the HF Hub. Honours `curation.json` and ships it with the dataset. `--format act` (default) for the ACT pipeline; `--format molmoact2` for MolmoAct2 fine-tuning (renames wrist streams: `wrist_2`→`left`, `wrist_1`→`right`; sets `robot_type: bi_yam_follower`). |
+| `push_dataset.py` | Resumable HF upload of a local LeRobotDataset (uses `hf_transfer` for speed). Reports the curation manifest; `--require-curation` refuses an untriaged one. |
 | `outputs/mission_hacks_calibrations.json` | Zero-based YAM ranges plus per-controller servo IDs, output ranges, mappings, signs, and fixed joints used by the bridge API. |
 
 ## Requirements
@@ -186,10 +187,14 @@ uv run -m teleoperation --ports /dev/serial/by-id/<leader-id> --yam-arm-cans can
 python control_panel.py
 #   - Connect (cameras) → Start Teleop → record episodes into named datasets
 
-# 4. Convert recorded episodes to a LeRobot dataset (in the lerobot env)
+# 4. Triage the recordings — writes episodes/<dataset>/curation.json
+uv run -m curation --src episodes/<dataset>
+uv run -m curation --src episodes/<dataset> --view-rejected   # argue with it
+
+# 5. Convert the survivors to a LeRobot dataset (in the lerobot env)
 python convert_to_lerobot.py --src episodes/<dataset> --repo-id <user>/<name> [--push]
 
-# 5. Train ACT locally
+# 6. Train ACT locally
 HF_HUB_ENABLE_HF_TRANSFER=1 lerobot-train \
     --dataset.repo_id=<user>/<name> --policy.type=act --policy.device=cuda \
     --policy.push_to_hub=false --batch_size=8 --steps=50000 --output_dir=outputs/act

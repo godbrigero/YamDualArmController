@@ -2,7 +2,7 @@
 title: Train
 subtitle: An ACT policy on your demos
 section: Collect
-order: 3
+order: 4
 ---
 
 With the dataset converted, training is one LeRobot command:

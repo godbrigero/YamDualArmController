@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -9,10 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 INITIALIZER = ROOT / "scripts" / "initialize_new_project.bash"
 SKILL = ROOT / "skills" / "connect-yam-leader"
 CONFIG = ROOT / "outputs" / "mission_hacks_calibrations.json"
+WINNOW = ROOT / "third_party" / "winnow"
 
 
 class InitializeNewProjectTest(unittest.TestCase):
     def initialize(self, target: Path) -> None:
+        # clone winnow from the submodule already on disk rather than from GitHub,
+        # so the test neither needs the network nor depends on winnow's main branch
+        environment = dict(os.environ, YAM_INITIALIZER_WINNOW_URL=str(WINNOW))
         subprocess.run(
             [
                 "bash",
@@ -25,6 +30,7 @@ class InitializeNewProjectTest(unittest.TestCase):
             ],
             check=True,
             cwd=ROOT,
+            env=environment,
             capture_output=True,
             text=True,
         )
@@ -37,6 +43,8 @@ class InitializeNewProjectTest(unittest.TestCase):
             self.assertTrue((target / "scripts/calibrate.py").is_file())
             self.assertTrue((target / "leader_yam_bridge/leader_yam_bridge.py").is_file())
             self.assertTrue((target / "teleoperation/__main__.py").is_file())
+            self.assertTrue((target / "curation/__main__.py").is_file())
+            self.assertTrue((target / "third_party/winnow/winnow/catalog.py").is_file())
             self.assertEqual(
                 (target / "outputs/mission_hacks_calibrations.json").read_bytes(),
                 CONFIG.read_bytes(),
