@@ -171,10 +171,23 @@ class CoverageTest(unittest.TestCase):
             for name, cams in (("episode_0000", pipeline.CAMS), ("episode_0001", ("top",))):
                 os.makedirs(os.path.join(video, name))
                 for cam in cams:
-                    Path(os.path.join(video, name, f"{cam}.mp4")).write_text("")
+                    Path(os.path.join(video, name, f"{cam}.mp4")).write_text("encoded")
             # episode_0001 was interrupted after one camera; ingest would
             # otherwise silently attach only that one
             self.assertEqual(pipeline.covered(src, "transcode"), {"episode_0000"})
+
+    def test_a_zero_byte_transcode_does_not_count_as_done(self):
+        """av creates the output file before the muxer writes to it, so an
+        interrupted re-encode leaves 0-byte mp4s. Counting one as finished would
+        hand it to AssetVideo and fail ingest on every subsequent run."""
+        with tempfile.TemporaryDirectory() as src:
+            self.corpus(src)
+            episode = os.path.join(pipeline.artifact(src, "video_h264"), "episode_0000")
+            os.makedirs(episode)
+            for cam in pipeline.CAMS:
+                Path(os.path.join(episode, f"{cam}.mp4")).write_text("encoded")
+            Path(os.path.join(episode, f"{pipeline.CAMS[-1]}.mp4")).write_text("")
+            self.assertEqual(pipeline.covered(src, "transcode"), set())
 
     def test_transcode_leftovers_do_not_make_the_stage_rerun_forever(self):
         """transcode only ever adds files, so its stale entries must not count.
@@ -223,6 +236,96 @@ class OrphanTest(unittest.TestCase):
             os.makedirs(pipeline.artifact(src, "rrd"))
             pipeline.prune_orphans(src)
             self.assertFalse(os.path.exists(pipeline.artifact(src, "rrd/orphaned")))
+
+
+class DependencyTest(unittest.TestCase):
+    """A consumer that failed after its producer ran must still re-run later.
+
+    Driven with fake stages that write the real artifact shapes, so no winnow,
+    no rerun and no subprocess are involved.
+    """
+
+    def drive(self, src, stages, failing=(), refresh=False):
+        """Run the pipeline with `_run` replaced. Returns the stages it ran."""
+        ran = []
+
+        def fake_run(script, source, extra=(), quiet=False):
+            stage = os.path.basename(script)[: -len(".py")]
+            ran.append(stage)
+            if stage in failing:
+                raise pipeline.WinnowError(f"{stage} failed")
+            names = sorted(pipeline.episode_names(source))
+            if stage == "transcode":
+                for name in names:
+                    os.makedirs(pipeline.artifact(source, f"video_h264/{name}"), exist_ok=True)
+                    for cam in pipeline.CAMS:
+                        Path(pipeline.artifact(
+                            source, f"video_h264/{name}/{cam}.mp4")).write_text("x")
+            elif stage == "ingest":
+                os.makedirs(pipeline.artifact(source, "rrd"), exist_ok=True)
+                for name in names:
+                    Path(pipeline.artifact(source, f"rrd/{name}.rrd")).write_text("x")
+            else:
+                Path(pipeline.artifact(source, pipeline.ARTIFACTS[stage])).write_text(
+                    json.dumps({name: [] for name in names})
+                )
+
+        original_run, original_require = pipeline._run, pipeline.require_submodule
+        pipeline._run, pipeline.require_submodule = fake_run, lambda: None
+        try:
+            pipeline.run_pipeline(src, stages=stages, refresh=refresh)
+        finally:
+            pipeline._run, pipeline.require_submodule = original_run, original_require
+        return ran
+
+    def corpus(self, directory, count=2):
+        for index in range(count):
+            episode = os.path.join(directory, f"episode_{index:04d}")
+            os.makedirs(episode)
+            for name in pipeline.REQUIRED:
+                Path(os.path.join(episode, name)).write_text("x")
+
+    def test_repeated_runs_do_no_work(self):
+        with tempfile.TemporaryDirectory() as src:
+            self.corpus(src)
+            stages = ["vision", "ingest", "features", "detect"]
+            self.assertEqual(self.drive(src, stages), stages)
+            self.assertEqual(self.drive(src, stages), [])
+
+    def test_a_detect_that_failed_after_residual_reruns(self):
+        """The case that silently kept bad episodes: detect skipped forever, so
+        the panel never folded in the stray-debris detector."""
+        with tempfile.TemporaryDirectory() as src:
+            self.corpus(src)
+            plain = ["vision", "ingest", "features", "detect"]
+            self.drive(src, plain)
+            with_residual = ["vision", "ingest", "features", "residual", "detect"]
+            with self.assertRaises(pipeline.WinnowError):
+                self.drive(src, with_residual, failing=("detect",))
+            # detect is still owed, so the next run must redo it rather than
+            # report "already done" and write a manifest missing the detector
+            self.assertEqual(self.drive(src, with_residual), ["detect"])
+            self.assertEqual(self.drive(src, with_residual), [])
+
+    def test_an_ingest_that_failed_after_transcode_reruns(self):
+        with tempfile.TemporaryDirectory() as src:
+            self.corpus(src)
+            self.drive(src, ["vision", "ingest", "features", "detect"])
+            staged = ["vision", "transcode", "ingest", "features", "detect"]
+            with self.assertRaises(pipeline.WinnowError):
+                self.drive(src, staged, failing=("ingest",))
+            self.assertEqual(self.drive(src, staged), ["ingest"])
+            self.assertEqual(self.drive(src, staged), [])
+
+    def test_a_new_episode_reruns_every_stage(self):
+        with tempfile.TemporaryDirectory() as src:
+            self.corpus(src)
+            stages = ["vision", "ingest", "features", "detect"]
+            self.drive(src, stages)
+            os.makedirs(os.path.join(src, "episode_0002"))
+            for name in pipeline.REQUIRED:
+                Path(os.path.join(src, "episode_0002", name)).write_text("x")
+            self.assertEqual(self.drive(src, stages), stages)
 
 
 class PathTest(unittest.TestCase):

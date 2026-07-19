@@ -166,12 +166,16 @@ def covered(src: str, stage: str) -> set:
         return {os.path.basename(path)[: -len(".rrd")]
                 for path in glob.glob(os.path.join(target, "*.rrd"))}
     if stage == "transcode":
-        # a directory is not enough: transcode.py self-skips per file, so an
+        # A directory is not enough: transcode.py self-skips per file, so an
         # interrupted run leaves an episode with only some of its cameras and
-        # ingest would silently attach just those
+        # ingest would silently attach just those. Match transcode.py's own
+        # resume rule — non-zero size, because av creates the output file before
+        # the muxer flushes anything into it, and a 0-byte mp4 that counted as
+        # done would be handed to AssetVideo and fail ingest on every re-run.
         return {os.path.basename(path)
                 for path in glob.glob(os.path.join(target, "episode_*"))
-                if all(os.path.exists(os.path.join(path, f"{cam}.mp4")) for cam in CAMS)}
+                if all(os.path.getsize(clip) if os.path.exists(clip) else 0
+                       for clip in (os.path.join(path, f"{cam}.mp4") for cam in CAMS))}
     try:
         with open(target) as handle:
             return set(json.load(handle))
@@ -199,7 +203,14 @@ def prune_orphans(src: str) -> None:
     aside = artifact(src, os.path.join("rrd", "orphaned"))
     os.makedirs(aside, exist_ok=True)
     for path in orphans:
-        shutil.move(path, os.path.join(aside, os.path.basename(path)))
+        name = os.path.basename(path)
+        # an episode recorded, ingested, deleted and recorded again under the
+        # same number would otherwise overwrite the copy already set aside
+        destination, suffix = os.path.join(aside, name), 1
+        while os.path.exists(destination):
+            destination = os.path.join(aside, f"{name[: -len('.rrd')]}.{suffix}.rrd")
+            suffix += 1
+        shutil.move(path, destination)
     print(f"[curate] set aside {len(orphans)} recording(s) with no episode folder "
           f"-> {os.path.relpath(aside, os.path.abspath(src))}", flush=True)
 
@@ -216,30 +227,40 @@ def _run(script: str, src: str, extra=(), quiet=False) -> None:
         raise WinnowError(f"winnow stage failed: {' '.join(command)}{detail}") from error
 
 
-def run_pipeline(src: str, stages=DEFAULT_STAGES, refresh=False, force=()) -> list[str]:
+def owed_marker(src: str, consumer: str) -> str:
+    return artifact(src, f".{consumer}-owed")
+
+
+def run_pipeline(src: str, stages=DEFAULT_STAGES, refresh=False) -> list[str]:
     """Run the named winnow stages over `src`. Returns any preflight warnings.
 
-    A stage is skipped only when its artifact already accounts for every episode
-    in the corpus. `refresh` re-runs everything; `force` re-runs named stages,
-    which is how `detect` runs again once `residual` has produced the input it
-    folds into the panel.
+    A stage is skipped only when its artifact accounts for exactly the current
+    corpus and nothing it depends on has been rebuilt since. `refresh` re-runs
+    everything.
     """
     require_submodule()
     warnings = preflight(src)
     os.makedirs(data_dir(src), exist_ok=True)
     prune_orphans(src)
     episodes = episode_names(src)
-    force = set(force)
 
     for stage in stages:
         accounted = covered(src, stage)
         missing = episodes - accounted
         stale = (accounted - episodes) if stage in STALE_MATTERS else set()
-        if not refresh and stage not in force and not missing and not stale:
+        # a debt recorded on disk, so that a consumer killed or failed after its
+        # producer succeeded is still re-run on the next invocation. Held only in
+        # memory, both stages would look "already done" forever after — and for
+        # residual -> detect that means a panel with the stray-debris detector
+        # silently missing, which keeps bad episodes rather than just looking wrong.
+        owed = os.path.exists(owed_marker(src, stage))
+        if not refresh and not owed and not missing and not stale:
             print(f"[curate] {stage}: already done ({len(episodes)} episodes)", flush=True)
             continue
-        if refresh or stage in force:
+        if refresh:
             reason = "forced"
+        elif owed:
+            reason = "its input was rebuilt"
         elif missing:
             reason = f"{len(missing)} of {len(episodes)} episodes outstanding"
         else:
@@ -259,8 +280,6 @@ def run_pipeline(src: str, stages=DEFAULT_STAGES, refresh=False, force=()) -> li
         # reference corpus, which say nothing about this one. The firings we care
         # about come back through detections.json.
         quiet = stage in ("detect", "residual")
-        if stage in DEPENDENTS:
-            force.add(DEPENDENTS[stage])
         try:
             _run(os.path.join("winnow", f"{stage}.py"), src, quiet=quiet)
         except WinnowError:
@@ -273,9 +292,20 @@ def run_pipeline(src: str, stages=DEFAULT_STAGES, refresh=False, force=()) -> li
                     "debug overlays for episode ids from its own corpus). The stray-debris "
                     "scores were still produced and are being used."
                 )
+                _settle(src, stage)
                 continue
             raise
+        _settle(src, stage)
     return warnings
+
+
+def _settle(src: str, stage: str) -> None:
+    """Record what this stage's output now owes, and clear its own debt."""
+    if stage in DEPENDENTS:
+        open(owed_marker(src, DEPENDENTS[stage]), "w").close()
+    marker = owed_marker(src, stage)
+    if os.path.exists(marker):
+        os.remove(marker)
 
 
 # what catalog.py's SQL reduction actually emits, for when a predicate names
@@ -295,8 +325,10 @@ def query_metrics(src: str, where: str):
         _run(QUERY_SCRIPT, src, ["--where", where, "--out", out], quiet=True)
     except WinnowError as error:
         stderr = (getattr(error.__cause__, "stderr", "") or "").strip()
-        if "Schema error" not in stderr:
-            raise            # not a bad predicate; the original message is the useful one
+        # "Schema error" is an unknown column, "SQL error" a malformed clause;
+        # anything else (uv missing, a dead catalog) has its own better message
+        if not any(kind in stderr for kind in ("Schema error", "SQL error")):
+            raise
         # DataFusion's schema error is much easier to act on next to the column
         # list, and its traceback above that line is all internals
         raise WinnowError(
