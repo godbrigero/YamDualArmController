@@ -245,15 +245,20 @@ class DependencyTest(unittest.TestCase):
     no rerun and no subprocess are involved.
     """
 
-    def drive(self, src, stages, failing=(), refresh=False):
-        """Run the pipeline with `_run` replaced. Returns the stages it ran."""
+    def drive(self, src, stages, failing=(), failing_early=(), refresh=False):
+        """Run the pipeline with `_run` replaced. Returns the stages it ran.
+
+        `failing` writes the stage's output and *then* raises — the harder case,
+        since coverage then says the stage is done. `failing_early` raises
+        before writing anything.
+        """
         ran = []
 
         def fake_run(script, source, extra=(), quiet=False):
             stage = os.path.basename(script)[: -len(".py")]
             ran.append(stage)
-            if stage in failing:
-                raise pipeline.WinnowError(f"{stage} failed")
+            if stage in failing_early:
+                raise pipeline.WinnowError(f"{stage} failed before writing")
             names = sorted(pipeline.episode_names(source))
             if stage == "transcode":
                 for name in names:
@@ -269,6 +274,8 @@ class DependencyTest(unittest.TestCase):
                 Path(pipeline.artifact(source, pipeline.ARTIFACTS[stage])).write_text(
                     json.dumps({name: [] for name in names})
                 )
+            if stage in failing:
+                raise pipeline.WinnowError(f"{stage} failed after writing")
 
         original_run, original_require = pipeline._run, pipeline.require_submodule
         pipeline._run, pipeline.require_submodule = fake_run, lambda: None
@@ -316,6 +323,35 @@ class DependencyTest(unittest.TestCase):
                 self.drive(src, staged, failing=("ingest",))
             self.assertEqual(self.drive(src, staged), ["ingest"])
             self.assertEqual(self.drive(src, staged), [])
+
+    def test_a_producer_that_fails_with_complete_output_still_owes_its_consumer(self):
+        """Coverage is read off the output, which can look finished while the
+        producer's process failed — an interrupt in transcode's last batch
+        leaves every mp4 written. The debt must not depend on a clean exit."""
+        with tempfile.TemporaryDirectory() as src:
+            self.corpus(src)
+            self.drive(src, ["vision", "ingest", "features", "detect"])
+            staged = ["vision", "transcode", "ingest", "features", "detect"]
+            # the fake transcode writes all its output, then raises
+            with self.assertRaises(pipeline.WinnowError):
+                self.drive(src, staged, failing=("transcode",))
+            self.assertEqual(self.drive(src, staged), ["ingest"])
+            self.assertEqual(self.drive(src, staged), [])
+
+    def test_a_stale_residual_is_not_mistaken_for_a_fresh_one(self):
+        """residual.py crashing *before* writing must not be waved through on the
+        strength of a residual.json left by an earlier, smaller corpus."""
+        with tempfile.TemporaryDirectory() as src:
+            self.corpus(src)
+            stages = ["vision", "ingest", "features", "residual", "detect"]
+            self.drive(src, stages)
+            episode = os.path.join(src, "episode_0002")
+            os.makedirs(episode)
+            for name in pipeline.REQUIRED:
+                Path(os.path.join(episode, name)).write_text("x")
+            # residual now fails without covering the new episode
+            with self.assertRaises(pipeline.WinnowError):
+                self.drive(src, stages, failing_early=("residual",))
 
     def test_a_new_episode_reruns_every_stage(self):
         with tempfile.TemporaryDirectory() as src:

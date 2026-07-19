@@ -169,9 +169,10 @@ def covered(src: str, stage: str) -> set:
         # A directory is not enough: transcode.py self-skips per file, so an
         # interrupted run leaves an episode with only some of its cameras and
         # ingest would silently attach just those. Match transcode.py's own
-        # resume rule — non-zero size, because av creates the output file before
-        # the muxer flushes anything into it, and a 0-byte mp4 that counted as
-        # done would be handed to AssetVideo and fail ingest on every re-run.
+        # resume rule — non-zero size — so a 0-byte output is not counted as
+        # finished. Note this inherits winnow's limitation: an mp4 truncated
+        # mid-encode is non-zero and neither this nor transcode.py can tell it
+        # from a complete one. `--refresh` is the way out of that.
         return {os.path.basename(path)
                 for path in glob.glob(os.path.join(target, "episode_*"))
                 if all(os.path.getsize(clip) if os.path.exists(clip) else 0
@@ -280,29 +281,33 @@ def run_pipeline(src: str, stages=DEFAULT_STAGES, refresh=False) -> list[str]:
         # reference corpus, which say nothing about this one. The firings we care
         # about come back through detections.json.
         quiet = stage in ("detect", "residual")
+        # The debt is owed the moment this stage starts touching its output, not
+        # when it exits 0 — a stage can leave complete-looking output and still
+        # fail, and then nothing would ever tell the consumer to re-run.
+        if stage in DEPENDENTS:
+            open(owed_marker(src, DEPENDENTS[stage]), "w").close()
         try:
             _run(os.path.join("winnow", f"{stage}.py"), src, quiet=quiet)
         except WinnowError:
             # residual.py writes residual.json and *then* crashes rendering debug
-            # overlays for hardcoded episode ids from winnow's own corpus. The
-            # artifact we need survives, so a crash after it is written is not fatal.
-            if stage == "residual" and os.path.exists(artifact(src, ARTIFACTS["residual"])):
+            # overlays for hardcoded episode ids from winnow's own corpus. That is
+            # survivable — but only if the scores it wrote actually cover this
+            # corpus, rather than being a stale file from an earlier run.
+            if stage == "residual" and not (episodes - covered(src, "residual")):
                 warnings.append(
                     "winnow's residual.py failed after writing residual.json (it renders "
                     "debug overlays for episode ids from its own corpus). The stray-debris "
                     "scores were still produced and are being used."
                 )
-                _settle(src, stage)
+                _discharge(src, stage)
                 continue
             raise
-        _settle(src, stage)
+        _discharge(src, stage)
     return warnings
 
 
-def _settle(src: str, stage: str) -> None:
-    """Record what this stage's output now owes, and clear its own debt."""
-    if stage in DEPENDENTS:
-        open(owed_marker(src, DEPENDENTS[stage]), "w").close()
+def _discharge(src: str, stage: str) -> None:
+    """Clear this stage's own debt, now that it has succeeded."""
     marker = owed_marker(src, stage)
     if os.path.exists(marker):
         os.remove(marker)
