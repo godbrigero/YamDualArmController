@@ -88,15 +88,37 @@ sync_managed_directory() {
     cp -R "$source_directory/." "$target_directory/"
 }
 
+install_seed_file() {
+    local source_file=$1
+    local target_file=$2
+
+    if [[ -d "$target_file" ]]; then
+        printf 'Cannot install seed file because the target is a directory: %s\n' "$target_file" >&2
+        return 1
+    fi
+
+    if [[ -e "$target_file" ]]; then
+        printf 'Preserving existing user file: %s\n' "$target_file"
+        return
+    fi
+
+    printf 'Installing seed: %s\n' "$target_file"
+    mkdir -p "$(dirname "$target_file")"
+    cp -p "$source_file" "$target_file"
+}
+
 run_project_initialization() {
     local repository_directory=$1
     local project_directory=$2
     local source_calibration_script="$repository_directory/scripts/calibrate.py"
     local source_bridge_directory="$repository_directory/leader_yam_bridge"
     local source_teleoperation_directory="$repository_directory/teleoperation"
+    local source_config_file="$repository_directory/outputs/mission_hacks_calibrations.json"
+    local source_skill_directory="$repository_directory/skills/connect-yam-leader"
     local target_scripts_directory="$project_directory/scripts"
     local target_bridge_directory="$project_directory/leader_yam_bridge"
     local target_teleoperation_directory="$project_directory/teleoperation"
+    local target_config_file="$project_directory/outputs/mission_hacks_calibrations.json"
 
     if [[ ! -f "$source_calibration_script" ]]; then
         printf 'Missing required file in cloned repository: %s\n' "$source_calibration_script" >&2
@@ -113,16 +135,22 @@ run_project_initialization() {
         return 1
     fi
 
+    if [[ ! -f "$source_config_file" ]]; then
+        printf 'Missing required seed configuration in cloned repository: %s\n' "$source_config_file" >&2
+        return 1
+    fi
+
+    if [[ ! -f "$source_skill_directory/SKILL.md" ]]; then
+        printf 'Missing required setup skill in cloned repository: %s\n' "$source_skill_directory" >&2
+        return 1
+    fi
+
     sync_managed_file "$source_calibration_script" "$target_scripts_directory/calibrate.py"
     sync_managed_directory "$source_bridge_directory" "$target_bridge_directory"
     sync_managed_directory "$source_teleoperation_directory" "$target_teleoperation_directory"
-
-    if [[ -d "$project_directory/outputs" ]]; then
-        printf 'Already present: %s/\n' "$project_directory/outputs"
-    else
-        printf 'Creating: %s/\n' "$project_directory/outputs"
-        mkdir -p "$project_directory/outputs"
-    fi
+    sync_managed_directory "$source_skill_directory" "$project_directory/.agents/skills/connect-yam-leader"
+    sync_managed_directory "$source_skill_directory" "$project_directory/.claude/skills/connect-yam-leader"
+    install_seed_file "$source_config_file" "$target_config_file"
 }
 
 configure_uv_project() {
@@ -153,7 +181,7 @@ configure_uv_project() {
 }
 
 show_calibration_prompt() {
-    local message='Project setup is complete. Run "uv run scripts/calibrate.py" to calibrate the servos and create the calibration JSON inside outputs/. Then start teleoperation with "uv run -m teleoperation".'
+    local message='Project setup is complete. Ask Codex for $connect-yam-leader or Claude Code for /connect-yam-leader. First run "uv run scripts/calibrate.py", then start teleoperation with "uv run -m teleoperation".'
 
     if [[ "${YAM_INITIALIZER_SKIP_PROMPT:-0}" == "1" ]]; then
         printf '\n%s\n' "$message"
@@ -161,7 +189,7 @@ show_calibration_prompt() {
     fi
 
     if command -v osascript >/dev/null 2>&1; then
-        osascript -e 'display dialog "Project setup is complete." & return & return & "First run: uv run scripts/calibrate.py" & return & "Then run: uv run -m teleoperation" & return & return & "Calibration creates its JSON inside outputs/." with title "YAM Project Setup" buttons {"OK"} default button "OK" with icon note'
+        osascript -e 'display dialog "Project setup is complete." & return & return & "Codex: $connect-yam-leader" & return & "Claude Code: /connect-yam-leader" & return & return & "First run: uv run scripts/calibrate.py" & return & "Then run: uv run -m teleoperation" with title "YAM Project Setup" buttons {"OK"} default button "OK" with icon note'
     elif command -v zenity >/dev/null 2>&1; then
         zenity --info --title='YAM Project Setup' --ok-label='OK' --text="$message"
     elif command -v kdialog >/dev/null 2>&1; then
@@ -195,4 +223,6 @@ main() {
     show_calibration_prompt
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

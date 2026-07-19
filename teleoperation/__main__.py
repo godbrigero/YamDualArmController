@@ -48,7 +48,9 @@ yam_arms = [
     for can_bus in namespace.yam_arm_cans
 ]
 
-leaders_to_yam_arms = dict(zip(leaders, yam_arms))
+leaders_to_yam_arms = dict(zip(leaders, yam_arms))  # have the input be mapped 1 to 1
+# this means that if you input [leader1, leader2], and [can0, can1], you will get a dictionary with the following keys:
+# {leader1: yam_arm_1, leader2: yam_arm_2}
 
 try:
     while True:

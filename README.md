@@ -26,7 +26,7 @@ Episodes ──► LeRobotDataset ──► lerobot-train (ACT) ──► deploy
 | `control_panel.py` | One-page web control panel (`:8080`): auto-discovers leaders/YAMs/cameras, buttons for Connect / Start Teleop / Stop, episode recording (named datasets, start/stop/save/discard), embeds the Rerun camera view. |
 | `so101_teleop.py` | SO-101 leader → YAM follower teleop. Absolute range-to-range joint mapping, slow-move-to-start, velocity clamp. Loads per-leader ranges from `leader_calibration.json` by controller serial. Publishes state to `/dev/shm` for the recorder. |
 | `camera_dashboard.py` | Owns the RealSense cameras, streams them to a Rerun web dashboard (scene-top / wrists-bottom layout), and hosts the episode **recorder** (control server on `:8090`). |
-| `scripts/calibration` | Concurrent multi-leader calibration: health-checks every selected controller, captures all ranges together, then atomically updates `outputs/mission_hacks_calibrations.json`. |
+| `scripts/calibrate.py` | Standalone concurrent multi-leader calibration command: health-checks every selected controller, captures all ranges together, then atomically updates `outputs/mission_hacks_calibrations.json`. |
 | `check_leader.py` | Quick single-leader health check (USB detection, servo power/stability, motion-corruption test). |
 | `check_cameras.py` | Snapshot each RealSense camera to verify it works / identify which is which. |
 | `episode_writer.py` | Dependency-light episode format: one `mp4` per camera + `npz` of state/action/timestamps, under `episodes/<dataset>/episode_XXXX/`. |
@@ -42,9 +42,13 @@ Episodes ──► LeRobotDataset ──► lerobot-train (ACT) ──► deploy
 
 ## Quickstart
 
+After running `scripts/initialize_new_project.bash`, invoke `$connect-yam-leader`
+in Codex or `/connect-yam-leader` in Claude Code for the guided setup and
+troubleshooting workflow.
+
 ```bash
 # 1. Calibrate the leader arms (once per arm)
-python -m scripts.calibration
+uv run scripts/calibrate.py
 
 # 2. Launch the control panel  →  open http://localhost:8080
 python control_panel.py

@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import json
 import os
+import sys
 import tempfile
 import threading
 import unittest
@@ -17,20 +18,24 @@ from leader_yam_bridge.leader_yam_bridge import (
     FeetechServo,
     load_bridge_config,
 )
-from scripts import calibration
 
 LEADER_A = "usb-1a86_USB_Single_Serial_A-if00"
 LEADER_B = "usb-1a86_USB_Single_Serial_B-if00"
+CURRENT_CALIBRATOR = Path(__file__).resolve().parents[2] / "scripts" / "calibrate.py"
 V1_CALIBRATOR = Path(__file__).resolve().parents[1] / "_v1" / "calibrate_leaders.py"
 
 
-def load_v1_calibrator():
-    spec = importlib.util.spec_from_file_location("v1_calibrator_oracle", V1_CALIBRATOR)
+def load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load {V1_CALIBRATOR}")
+        raise RuntimeError(f"Could not load {path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+calibration = load_module("current_calibrator", CURRENT_CALIBRATOR)
 
 
 def bridge_config() -> dict[str, object]:
@@ -92,7 +97,7 @@ def fake_session(leader_id: str) -> calibration.ControllerSession:
 class CalibrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.v1 = load_v1_calibrator()
+        cls.v1 = load_module("v1_calibrator_oracle", V1_CALIBRATOR)
 
     def test_default_output_is_the_bridge_config_file(self) -> None:
         self.assertEqual(calibration.parse_args([]).config_file, DEFAULT_CONFIG_PATH)
