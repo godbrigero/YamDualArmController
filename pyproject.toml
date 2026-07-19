@@ -20,3 +20,10 @@ dependencies = [
 [tool.uv]
 package = false
 build-constraint-dependencies = ["scikit-build-core<0.10"]
+
+# IDE / type checker: use the project venv so imports like `scservo_sdk`
+# (provided by the `feetech-servo-sdk` dependency) resolve to site-packages.
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"

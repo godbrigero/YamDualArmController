@@ -26,13 +26,13 @@ Episodes ──► LeRobotDataset ──► lerobot-train (ACT) ──► deploy
 | `control_panel.py` | One-page web control panel (`:8080`): auto-discovers leaders/YAMs/cameras, buttons for Connect / Start Teleop / Stop, episode recording (named datasets, start/stop/save/discard), embeds the Rerun camera view. |
 | `so101_teleop.py` | SO-101 leader → YAM follower teleop. Absolute range-to-range joint mapping, slow-move-to-start, velocity clamp. Loads per-leader ranges from `leader_calibration.json` by controller serial. Publishes state to `/dev/shm` for the recorder. |
 | `camera_dashboard.py` | Owns the RealSense cameras, streams them to a Rerun web dashboard (scene-top / wrists-bottom layout), and hosts the episode **recorder** (control server on `:8090`). |
-| `calibrate_leaders.py` | Multi-arm leader calibration manager: health-checks each connected leader, interactive full-range sweep, saves per-joint tick ranges to `leader_calibration.json` keyed by controller serial. |
+| `scripts/calibration` | Concurrent multi-leader calibration: health-checks every selected controller, captures all ranges together, then atomically updates `outputs/mission_hacks_calibrations.json`. |
 | `check_leader.py` | Quick single-leader health check (USB detection, servo power/stability, motion-corruption test). |
 | `check_cameras.py` | Snapshot each RealSense camera to verify it works / identify which is which. |
 | `episode_writer.py` | Dependency-light episode format: one `mp4` per camera + `npz` of state/action/timestamps, under `episodes/<dataset>/episode_XXXX/`. |
 | `convert_to_lerobot.py` | Convert `episodes/<dataset>/` → a `LeRobotDataset` (ACT-ready) and optionally push to the HF Hub. |
 | `push_dataset.py` | Resumable HF upload of a local LeRobotDataset (uses `hf_transfer` for speed). |
-| `leader_calibration.json` | Per-controller leader joint tick ranges (keyed by USB serial, stable across replug). |
+| `outputs/mission_hacks_calibrations.json` | Zero-based YAM ranges plus per-controller servo IDs, output ranges, mappings, signs, and fixed joints used by the bridge API. |
 
 ## Requirements
 
@@ -44,7 +44,7 @@ Episodes ──► LeRobotDataset ──► lerobot-train (ACT) ──► deploy
 
 ```bash
 # 1. Calibrate the leader arms (once per arm)
-python calibrate_leaders.py
+python -m scripts.calibration
 
 # 2. Launch the control panel  →  open http://localhost:8080
 python control_panel.py

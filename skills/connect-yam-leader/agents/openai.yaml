@@ -1,0 +1,4 @@
+interface:
+  display_name: "Connect YAM Leader"
+  short_description: "Set up and troubleshoot YAM leader teleoperation"
+  default_prompt: "Use $connect-yam-leader to calibrate my SO-101 leader and safely start YAM teleoperation."

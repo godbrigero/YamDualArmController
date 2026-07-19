@@ -3,6 +3,11 @@ episodes/
 cam_snapshots/
 # training outputs / checkpoints
 outputs/
+
+# Keep the typed bridge configuration; ignore other generated output artifacts.
+!outputs/
+outputs/*
+!outputs/mission_hacks_calibrations.json
 wandb/
 # python
 __pycache__/

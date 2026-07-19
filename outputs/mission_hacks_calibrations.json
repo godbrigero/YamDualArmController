@@ -1,0 +1,55 @@
+{
+  "yam_arm": {
+    "joint_ranges": {
+      "0": [-2.61799, 3.05433],
+      "1": [0.0, 3.65],
+      "2": [0.0, 3.66519],
+      "3": [-1.5708, 1.5708],
+      "4": [-1.5708, 1.5708],
+      "5": [-2.0944, 2.0944],
+      "6": [0.0, 1.0]
+    }
+  },
+  "leader_arms": {
+    "usb-1a86_USB_Single_Serial_5AE6080681-if00": {
+      "calibrated_at": "2026-07-18T16:54:35",
+      "port": {
+        "baud_rate": 1000000,
+        "protocol_end": 0,
+        "position_address": 56,
+        "valid_position_range": [0, 4095]
+      },
+      "fixed_yam_joints": [
+        {"yam_joint": 4, "position": 0.0}
+      ],
+      "servos": [
+        {"id": 1, "output_range": [838, 3441], "yam_joint": 0, "sign": -1},
+        {"id": 2, "output_range": [892, 3055], "yam_joint": 1, "sign": 1},
+        {"id": 3, "output_range": [1048, 3220], "yam_joint": 2, "sign": -1},
+        {"id": 4, "output_range": [747, 3051], "yam_joint": 3, "sign": -1},
+        {"id": 5, "output_range": [199, 4031], "yam_joint": 5, "sign": -1},
+        {"id": 6, "output_range": [1716, 2890], "yam_joint": 6, "sign": 1}
+      ]
+    },
+    "usb-1a86_USB_Single_Serial_5B14115162-if00": {
+      "calibrated_at": "2026-07-18T16:58:39",
+      "port": {
+        "baud_rate": 1000000,
+        "protocol_end": 0,
+        "position_address": 56,
+        "valid_position_range": [0, 4095]
+      },
+      "fixed_yam_joints": [
+        {"yam_joint": 4, "position": 0.0}
+      ],
+      "servos": [
+        {"id": 1, "output_range": [769, 3263], "yam_joint": 0, "sign": -1},
+        {"id": 2, "output_range": [913, 3263], "yam_joint": 1, "sign": 1},
+        {"id": 3, "output_range": [847, 3048], "yam_joint": 2, "sign": -1},
+        {"id": 4, "output_range": [787, 3142], "yam_joint": 3, "sign": -1},
+        {"id": 5, "output_range": [139, 3862], "yam_joint": 5, "sign": -1},
+        {"id": 6, "output_range": [1544, 2932], "yam_joint": 6, "sign": 1}
+      ]
+    }
+  }
+}
