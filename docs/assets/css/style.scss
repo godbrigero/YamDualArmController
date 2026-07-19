@@ -214,6 +214,26 @@
 }
 
 @media (max-width: 640px) {
+  // Inline code chips are `white-space: nowrap` in the theme, which keeps them
+  // tidy on desktop but lets a long path (outputs/mission_hacks_calibrations.json)
+  // push its paragraph past a phone viewport. Let them wrap at this width only.
+  .an-prose :not(pre) > code,
+  .an-callout :not(pre) > code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  // Wide reference tables (troubleshoot, install) scroll on their own rather
+  // than widening the page. Without the cell floor the columns collapse to one
+  // word each, which is harder to read than scrolling.
+  .an-prose table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .an-prose th,
+  .an-prose td { min-width: 11rem; }
+
   .an-prompt__head { align-items: flex-start; flex-direction: column; }
   .an-cmd { flex-direction: column; align-items: stretch; padding: 12px; }
   .an-cmd__text { padding-bottom: 4px; }
