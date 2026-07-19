@@ -51,6 +51,36 @@ actions:
 show_announcements: false
 ---
 
+## The same YAM startup, in one command
+
+With native YAM leader hardware, manual control normally means starting two
+workers — one for the follower and one for the leader — in separate terminals:
+
+```bash
+# Terminal 1: YAM follower
+python examples/minimum_gello/minimum_gello.py \
+  --gripper linear_4310 --mode follower --can-channel can0 --bilateral-kp 0.2
+
+# Terminal 2: native YAM leader
+python examples/minimum_gello/minimum_gello.py \
+  --gripper yam_teaching_handle --mode leader --can-channel can1 --bilateral-kp 0.2
+```
+
+This controller does the same leader-to-follower job with one worker:
+
+```bash
+uv run -m teleoperation \
+  --ports /dev/serial/by-id/<leader-id> \
+  --yam-arm-cans can0
+```
+
+`--yam-arm-cans can0` is still the normal YAM follower connection. The only
+change is that `--ports` opens the SO-101 leader over USB in the same process,
+instead of starting a second worker for a native YAM leader on CAN. For two
+arms, pass two leader ports and two CAN channels to that same command. See
+[Teleoperate]({{ '/docs/teleoperate/' | relative_url }}) for the bimanual form
+and safety notes.
+
 ## What the skill actually does
 
 The prompt above hands the whole path to your agent: hardware discovery,
