@@ -26,9 +26,7 @@ from scservo_sdk import PacketHandler, PortHandler
 
 ADDR_POS = 56
 NAMES = ["pan", "lift", "elbow", "wrist_flex", "wrist_roll", "gripper"]
-CALIB_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "leader_calibration.json"
-)
+CALIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "leader_calibration.json")
 
 
 # --------------------------------------------------------------------------- #
@@ -120,7 +118,7 @@ def calibrate_sweep(pk, ph):
     """Interactive full-range sweep. Returns (ranges dict, corrupt_total)."""
     cur = {i: None for i in range(1, 7)}
     mn = {i: 10**9 for i in range(1, 7)}
-    mx = {i: -(10**9) for i in range(1, 7)}
+    mx = {i: -10**9 for i in range(1, 7)}
     corrupt = {i: 0 for i in range(1, 7)}
     for i in range(1, 7):
         v = robust_read(pk, ph, i)
@@ -128,17 +126,13 @@ def calibrate_sweep(pk, ph):
             v = robust_read(pk, ph, i)
         mn[i] = mx[i] = cur[i] = v
 
-    input(
-        "    >> Press ENTER, then sweep EVERY joint to both extremes + gripper. Ctrl-C when done..."
-    )
+    input("    >> Press ENTER, then sweep EVERY joint to both extremes + gripper. Ctrl-C when done...")
     t0 = time.time()
     last = 0.0
     drawn = [False]
 
     def render():
-        lines = [
-            f"    {'JOINT':<11} {'POS':>6} {'MIN':>5} {'MAX':>5} {'SPAN':>5}   STATUS"
-        ]
+        lines = [f"    {'JOINT':<11} {'POS':>6} {'MIN':>5} {'MAX':>5} {'SPAN':>5}   STATUS"]
         for j in range(1, 7):
             v = cur[j]
             poss = f"{v:6d}" if isinstance(v, int) else "   ---"
@@ -150,12 +144,8 @@ def calibrate_sweep(pk, ph):
                 st = "move it"
             else:
                 st = "ok"
-            lines.append(
-                f"    {NAMES[j-1]:<11} {poss} {lo:5d} {hi:5d} {span:5d}   {st}"
-            )
-        lines.append(
-            f"    elapsed {time.time()-t0:5.1f}s   corrupt {sum(corrupt.values())}   (Ctrl-C when done)"
-        )
+            lines.append(f"    {NAMES[j-1]:<11} {poss} {lo:5d} {hi:5d} {span:5d}   {st}")
+        lines.append(f"    elapsed {time.time()-t0:5.1f}s   corrupt {sum(corrupt.values())}   (Ctrl-C when done)")
         block = "".join("\033[2K" + ln + "\n" for ln in lines)
         if drawn[0]:
             block = f"\033[{len(lines)}A" + block
@@ -192,12 +182,8 @@ def calibrate_sweep(pk, ph):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pings", type=int, default=15)
-    ap.add_argument(
-        "--check-only", action="store_true", help="health check, don't calibrate"
-    )
-    ap.add_argument(
-        "--show", action="store_true", help="print saved calibration and exit"
-    )
+    ap.add_argument("--check-only", action="store_true", help="health check, don't calibrate")
+    ap.add_argument("--show", action="store_true", help="print saved calibration and exit")
     args = ap.parse_args()
 
     calib = load_calib()
@@ -207,9 +193,7 @@ def main():
         if not calib:
             print("  (empty)")
         for cid, e in calib.items():
-            print(
-                f"  [{cid}] last_port={e.get('last_port')} calibrated_at={e.get('calibrated_at')}"
-            )
+            print(f"  [{cid}] last_port={e.get('last_port')} calibrated_at={e.get('calibrated_at')}")
             for jn, (lo, hi) in e.get("ranges", {}).items():
                 print(f"      {jn:11s} {lo:5d}..{hi:5d}")
         return
@@ -248,15 +232,11 @@ def main():
         print(f"     full 6/6: {full}/{args.pings}  ->  {status}")
 
         if status == "NO_POWER":
-            print(
-                "     ✗ servos unpowered — connect the power brick. Skipping this controller."
-            )
+            print("     ✗ servos unpowered — connect the power brick. Skipping this controller.")
             ph.closePort()
             continue
         if status == "FLAKY":
-            print(
-                "     ✗ flaky (under-powered or loose cable). Fix before calibrating. Skipping."
-            )
+            print("     ✗ flaky (under-powered or loose cable). Fix before calibrating. Skipping.")
             ph.closePort()
             continue
         print("     ✓ connection good.")
@@ -279,9 +259,7 @@ def main():
         for jn, (lo, hi) in ranges.items():
             print(f"      {jn:11s} {lo:5d}..{hi:5d}  span {hi-lo}")
         if corrupt_total > 0:
-            print(
-                f"    ⚠ {corrupt_total} corrupt reads during sweep (possible bad cable)."
-            )
+            print(f"    ⚠ {corrupt_total} corrupt reads during sweep (possible bad cable).")
             keep = input("    Save anyway? [y/N]: ").strip().lower()
             if keep not in ("y", "yes"):
                 print("    NOT saved. Fix the cable and re-run.")

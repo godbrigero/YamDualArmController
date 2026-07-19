@@ -26,7 +26,6 @@ import time
 from dataclasses import dataclass
 
 import numpy as np
-# PyPI: feetech-servo-sdk → importable as scservo_sdk (Feetech STS/SCS SDK)
 from scservo_sdk import PacketHandler, PortHandler
 
 ADDR_POS = 56

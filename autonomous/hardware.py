@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from i2rt.robots.robot import Robot
 import numpy as np
 import pyrealsense2 as rs
 from i2rt.robots.get_robot import get_yam_robot
@@ -33,7 +34,9 @@ class CameraRig:
                 pipeline = rs.pipeline()
                 config = rs.config()
                 config.enable_device(serial)
-                config.enable_stream(rs.stream.color, width, height, rs.format.rgb8, fps)
+                config.enable_stream(
+                    rs.stream.color, width, height, rs.format.rgb8, fps
+                )
                 pipeline.start(config)
                 for _ in range(5):
                     pipeline.wait_for_frames(timeout_ms=2000)
@@ -63,7 +66,7 @@ class CameraRig:
                 print(f"camera cleanup warning: {exc}")
 
 
-def open_yam_arms(left_channel: str, right_channel: str) -> list[object]:
+def open_yam_arms(left_channel: str, right_channel: str) -> list[Robot]:
     return [
         get_yam_robot(
             channel=channel,
@@ -72,4 +75,3 @@ def open_yam_arms(left_channel: str, right_channel: str) -> list[object]:
         )
         for channel in (left_channel, right_channel)
     ]
-

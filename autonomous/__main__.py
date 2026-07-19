@@ -8,6 +8,7 @@ import time
 
 import numpy as np
 
+from i2rt.robots.robot import Robot
 from autonomous.act_policy import ACTPolicy
 from autonomous.control import bounded_action
 from autonomous.hardware import CameraRig, open_yam_arms
@@ -21,7 +22,9 @@ from autonomous.policies import (
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Autonomous bimanual YAM controller")
     parser.add_argument("--policy", choices=("act", "vla"), required=True)
-    parser.add_argument("--task", required=True, help="natural-language task instruction")
+    parser.add_argument(
+        "--task", required=True, help="natural-language task instruction"
+    )
     parser.add_argument("--left-arm-can", default="can0")
     parser.add_argument("--right-arm-can", default="can1")
     parser.add_argument("--top", required=True, help="top RealSense serial number")
@@ -31,15 +34,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=424)
     parser.add_argument("--height", type=int, default=240)
     parser.add_argument("--fps", type=float, default=15.0)
-    parser.add_argument("--checkpoint", help="local path or Hub ID for the trained ACT checkpoint")
-    parser.add_argument("--device", help="ACT device override, for example cuda, mps, or cpu")
+    parser.add_argument(
+        "--checkpoint", help="local path or Hub ID for the trained ACT checkpoint"
+    )
+    parser.add_argument(
+        "--device", help="ACT device override, for example cuda, mps, or cpu"
+    )
     parser.add_argument("--vla-url", help="MolmoAct2 cloud server base URL")
     parser.add_argument("--vla-token-env", default="YAM_VLA_TOKEN")
     parser.add_argument("--modal-key-env", default="MODAL_PROXY_TOKEN_ID")
     parser.add_argument("--modal-secret-env", default="MODAL_PROXY_TOKEN_SECRET")
     parser.add_argument("--vla-timeout", type=float, default=120.0)
-    parser.add_argument("--max-joint-speed", type=float, default=0.5, help="rad/s per arm joint")
-    parser.add_argument("--max-gripper-speed", type=float, default=1.0, help="normalized units/s")
+    parser.add_argument(
+        "--max-joint-speed", type=float, default=0.5, help="rad/s per arm joint"
+    )
+    parser.add_argument(
+        "--max-gripper-speed", type=float, default=1.0, help="normalized units/s"
+    )
     parser.add_argument("--max-steps", type=int, default=0, help="0 runs until Ctrl-C")
     parser.add_argument(
         "--execute",
@@ -72,7 +83,7 @@ def main() -> None:
     args = parse_args()
     policy: AutonomousPolicy | None = None
     cameras: CameraRig | None = None
-    arms: list[object] = []
+    arms: list[Robot] = []
     dt = 1.0 / args.fps
     try:
         policy = make_policy(args)
@@ -84,10 +95,14 @@ def main() -> None:
         )
         arms = open_yam_arms(args.left_arm_can, args.right_arm_can)
         if any(arm.num_dofs() != 7 for arm in arms):
-            raise RuntimeError("each YAM must expose six arm joints plus one gripper joint")
+            raise RuntimeError(
+                "each YAM must expose six arm joints plus one gripper joint"
+            )
 
         mode = "LIVE" if args.execute else "DRY RUN"
-        print(f"{mode}: {args.policy} policy; Ctrl-C to return both arms to gravity-comp idle")
+        print(
+            f"{mode}: {args.policy} policy; Ctrl-C to return both arms to gravity-comp idle"
+        )
         step = 0
         policy.reset()
         while args.max_steps <= 0 or step < args.max_steps:
@@ -95,7 +110,9 @@ def main() -> None:
             state = np.concatenate(
                 [np.asarray(arm.get_joint_pos(), dtype=np.float32)[:7] for arm in arms]
             )
-            observation = PolicyObservation(state=state, images=cameras.capture(), task=args.task)
+            observation = PolicyObservation(
+                state=state, images=cameras.capture(), task=args.task
+            )
             target = policy.predict(observation)
             command = bounded_action(
                 target,

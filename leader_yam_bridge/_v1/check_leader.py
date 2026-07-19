@@ -17,7 +17,6 @@ import glob
 import os
 import time
 
-# PyPI: feetech-servo-sdk → importable as scservo_sdk (Feetech STS/SCS SDK)
 from scservo_sdk import PacketHandler, PortHandler
 
 ADDR_POS = 56

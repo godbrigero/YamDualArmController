@@ -27,6 +27,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 RECORD_BASE = "http://localhost:8090/record"
+CONDA_PY = "/home/shiv/miniforge3/envs/lerobot/bin/python"  # has lerobot + i2rt for ACT inference
 
 
 def rec_get():
@@ -184,6 +185,69 @@ def stop_all():
     return f"stopped {t} teleop + {c} camera process(es)"
 
 
+# ------------------------------------------------------------------ ACT inference
+def list_checkpoints():
+    out = []
+    for d in sorted(glob.glob(os.path.join(REPO, "outputs", "*", "checkpoints", "*"))):
+        if os.path.exists(os.path.join(d, "pretrained_model", "model.safetensors")):
+            parts = d.split(os.sep)
+            out.append({"name": f"{parts[-3]}/{parts[-1]}", "path": d})
+    return out
+
+
+def infer_status():
+    for _, cl in procs_matching("infer_act.py"):
+        m = re.search(r"--checkpoint (\S+)", cl)
+        ck = m.group(1) if m else "?"
+        parts = ck.split(os.sep)
+        st = {"running": True, "dry_run": "--dry-run" in cl,
+              "checkpoint": f"{parts[-3]}/{parts[-1]}" if len(parts) >= 3 else ck}
+        try:
+            d = json.load(open("/dev/shm/infer_action.json"))
+            if time.time() - d.get("t", 0) < 2.0:
+                st["action"] = d.get("action")
+        except Exception:
+            pass
+        return st
+    return {"running": False}
+
+
+def start_inference(name, dry_run):
+    if procs_matching("infer_act.py"):
+        return "inference already running — stop it first"
+    ckpt = next((c["path"] for c in list_checkpoints() if c["name"] == name), None)
+    if not ckpt:
+        return f"checkpoint not found: {name}"
+    if not dry_run:
+        _kill("so101_teleop")  # LIVE: policy replaces the leaders — free the YAMs
+        time.sleep(1.5)
+    cmd = [CONDA_PY, os.path.join(REPO, "infer_act.py"),
+           "--checkpoint", ckpt, "--channels", "can0,can1"]
+    if dry_run:
+        cmd.append("--dry-run")
+    log = open(os.path.join(REPO, "infer.log"), "w")  # tail this for raw output
+    subprocess.Popen(cmd, cwd=REPO, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    return f"inference {'(dry-run) ' if dry_run else '(LIVE) '}starting: {name} (loads in ~10s)"
+
+
+def stop_inference():
+    # SIGINT triggers infer_act's reset-to-home in its finally block; give it time
+    n = 0
+    for pid, _ in procs_matching("infer_act.py"):
+        try:
+            os.kill(pid, signal.SIGINT)
+            n += 1
+        except Exception:
+            pass
+    time.sleep(4)  # allow the ~2.5s slow-move-to-home to complete
+    for pid, _ in procs_matching("infer_act.py"):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except Exception:
+            pass
+    return f"stopped {n} inference — arms returning to home"
+
+
 # ------------------------------------------------------------------ status
 def status():
     ports = leader_ports()
@@ -207,6 +271,8 @@ def status():
         "cameras_streaming": bool(procs_matching("camera_dashboard.py")),
         "rerun_url": RERUN_URL,
         "record": rec_get(),
+        "checkpoints": list_checkpoints(),
+        "inference": infer_status(),
     }
 
 
@@ -223,6 +289,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Teleop Control
  .go{background:#1f6f43;border-color:#2c8f59}.go:hover{background:#268a53}
  .stop{background:#7a2230;border-color:#a13141}.stop:hover{background:#93293a}
  input{font-size:14px;padding:8px 10px;border-radius:8px;border:1px solid #2a2f3a;background:#0f1115;color:#e6e6e6;width:150px}
+ select{font-size:13px;padding:8px 10px;border-radius:8px;border:1px solid #2a2f3a;background:#0f1115;color:#e6e6e6;max-width:230px}
  #msg{margin-left:auto;font-size:13px;color:#9fb0c3;max-width:40ch}
  .wrap{display:flex;gap:16px;padding:16px;flex-wrap:wrap}
  .card{background:#171a21;border:1px solid #2a2f3a;border-radius:12px;padding:14px 16px}
@@ -264,7 +331,16 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Teleop Control
      <button class="go" onclick="act('record/save')">Save</button>
      <button class="stop" onclick="act('record/discard')">Discard</button>
    </div>
-   <div class="sub" style="margin-top:12px">Stage 2 (soon): train ACT · deploy · visualize</div>
+   <div style="font-weight:600;margin:18px 0 6px">Policy inference (ACT)</div>
+   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+     <select id="ckpt"></select>
+     <label class="sub"><input type="checkbox" id="dry" checked style="width:auto"> dry-run (no motion)</label>
+   </div>
+   <div id="infstatus" class="sub" style="margin-top:6px">—</div>
+   <div style="margin-top:8px;display:flex;gap:8px">
+     <button class="go" onclick="runInfer()">▶ Run policy</button>
+     <button class="stop" onclick="act('infer/stop')">Stop policy</button>
+   </div>
  </div>
  <div class="card streams">
    <div style="font-weight:600;margin-bottom:8px">Camera streams
@@ -308,6 +384,31 @@ async function refresh(){
     document.getElementById('dsname').placeholder = rec.dataset;
   }
   document.getElementById('recstatus').innerHTML = rs;
+  // policy inference
+  const sel = document.getElementById('ckpt');
+  const cur = sel.value;
+  const cks = s.checkpoints || [];
+  sel.innerHTML = cks.length ? cks.map(c => '<option>'+c.name+'</option>').join('') : '<option>no checkpoints</option>';
+  if (cur && cks.some(c => c.name === cur)) sel.value = cur;
+  const inf = s.inference || {running:false};
+  let ih = inf.running
+    ? dot('ok') + (inf.dry_run ? 'DRY-RUN · ' : '● LIVE · ') + 'policy ' + inf.checkpoint
+    : dot('idle') + 'idle';
+  if (inf.running && inf.action) {
+    const a = inf.action, f = arr => arr.map(v => (v>=0?'+':'')+v.toFixed(2)).join(' ');
+    ih += '<div style="font-family:monospace;font-size:11px;color:#7fd8a0;margin-top:4px">'
+        + 'can0 ['+f(a.slice(0,7))+']<br>can1 ['+f(a.slice(7,14))+']</div>';
+  } else if (inf.running) {
+    ih += ' <span class="sub">(loading / waiting for first prediction…)</span>';
+  }
+  document.getElementById('infstatus').innerHTML = ih;
+}
+function runInfer(){
+  const ck = document.getElementById('ckpt').value;
+  const dry = document.getElementById('dry').checked;
+  if(!ck || ck === 'no checkpoints'){ alert('no checkpoint available'); return; }
+  if(!dry && !confirm('LIVE policy will DRIVE both arms and STOP teleop. Workspace clear + hand on e-stop?')) return;
+  act('infer/start?ckpt='+encodeURIComponent(ck)+'&dry='+(dry?'1':'0'));
 }
 function setDataset(){
   const n = document.getElementById('dsname').value.trim();
@@ -365,6 +466,17 @@ class Handler(BaseHTTPRequestHandler):
         # record calls forward straight through to the capture service (keep query string)
         if self.path.startswith("/api/record/"):
             self._json({"msg": rec_post(self.path[len("/api/record/"):])})
+            return
+        if self.path.startswith("/api/infer/"):
+            from urllib.parse import parse_qs, urlparse
+            pp = urlparse(self.path)
+            q = parse_qs(pp.query)
+            if pp.path == "/api/infer/start":
+                self._json({"msg": start_inference(q.get("ckpt", [""])[0], q.get("dry", ["0"])[0] == "1")})
+            elif pp.path == "/api/infer/stop":
+                self._json({"msg": stop_inference()})
+            else:
+                self.send_error(404)
             return
         routes = {
             "/api/connect": lambda: start_cameras(),
