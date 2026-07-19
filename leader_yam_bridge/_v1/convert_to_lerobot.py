@@ -9,15 +9,29 @@ Run with the conda lerobot python:
 pipeline; --format molmoact2 emits observation.images.{top,left,right} and
 robot_type bi_yam_follower for MolmoAct2 fine-tuning (yam_fold mixture in
 molmoact2/experiments/launch_scripts/data_mixtures.py).
+
+If the source directory carries a `curation.json` — written by
+`uv run -m curation --src episodes/<dataset>`, which triages the corpus through
+winnow's Rerun catalog — only the episodes it kept are converted, and the
+manifest is copied into the dataset so the Hub records which recordings the
+policy was trained on and why the rest were dropped. `--curation off` converts
+everything; `--curation require` refuses to run without a manifest.
 """
 import argparse
 import glob
 import os
 import shutil
+import sys
 
 import cv2
 import numpy as np
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+try:
+    from curation.manifest import filter_episodes, load_manifest
+except ImportError:  # copied out of the project on its own
+    filter_episodes = load_manifest = None
 
 CAMS = ["top", "wrist_1", "wrist_2"]
 # dataset camera keys per output format; source mp4 names are always CAMS.
@@ -46,6 +60,34 @@ def build_features(h, w, cam_keys):
     return feats
 
 
+def resolve_curation(args):
+    """The triage decision to honour, and where it came from. (None, None) if none."""
+    if load_manifest is None:
+        if args.curation == "require":
+            raise SystemExit(
+                "the curation package is not importable, so no manifest can be read. "
+                "Run this from a checkout with curation/ beside leader_yam_bridge/, "
+                "or pass --curation off."
+            )
+        print("curation package not importable — converting every episode.")
+        return None, None
+
+    source = args.curation_manifest or args.src
+    manifest = None if args.curation == "off" else load_manifest(source)
+    if manifest is None:
+        if args.curation == "require":
+            raise SystemExit(
+                f"no curation.json for {args.src}. Triage the corpus first:\n"
+                f"    uv run -m curation --src {args.src}\n"
+                "or pass --curation off to convert every episode regardless."
+            )
+        if args.curation == "auto":
+            print(f"no curation.json in {source} — converting every episode.")
+            print(f"    uv run -m curation --src {args.src}    # triage first")
+        return None, None
+    return manifest, os.path.join(source, "curation.json") if os.path.isdir(source) else source
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default="episodes/default")
@@ -58,6 +100,11 @@ def main():
                     help="override robot_type (default depends on --format)")
     ap.add_argument("--limit", type=int, default=0, help="only convert first N episodes (0 = all)")
     ap.add_argument("--episodes", default="", help="only these episode indices, e.g. 7,8,12-19")
+    ap.add_argument("--curation", choices=("auto", "require", "off"), default="auto",
+                    help="auto: use curation.json if present; require: fail without it; "
+                         "off: convert every episode")
+    ap.add_argument("--curation-manifest", default=None,
+                    help="path to a curation.json elsewhere (default: <src>/curation.json)")
     ap.add_argument("--push", action="store_true")
     ap.add_argument("--private", action="store_true")
     args = ap.parse_args()
@@ -78,11 +125,24 @@ def main():
                 keep.add(int(part))
         eps = [e for e in eps if int(os.path.basename(e).split("_")[1]) in keep]
         print(f"filtering to {len(eps)} episodes: {sorted(keep)}")
-    if args.limit:
-        eps = eps[: args.limit]
     if not eps:
         print(f"no episodes in {args.src}")
         return
+
+    manifest, manifest_src = resolve_curation(args)
+    if manifest is not None:
+        eps, skipped = filter_episodes(eps, manifest)
+        print(f"curation ({os.path.relpath(manifest_src)}): {manifest.summary()}")
+        print(f"  query: {manifest.query}")
+        for path in skipped:
+            name = os.path.basename(path)
+            print(f"  skipping {name}: {'; '.join(manifest.rejected.get(name, ['not kept']))}")
+        if not eps:
+            print("curation rejected every episode; nothing to convert")
+            return
+
+    if args.limit:
+        eps = eps[: args.limit]
     # resolution from the first video
     cap = cv2.VideoCapture(os.path.join(eps[0], f"{CAMS[0]}.mp4"))
     w, h = int(cap.get(3)), int(cap.get(4))
@@ -99,6 +159,8 @@ def main():
         repo_id=args.repo_id, fps=args.fps, features=build_features(h, w, cam_keys),
         robot_type=robot_type, use_videos=True,
     )
+    # where it actually landed, which is not the guess above under HF_LEROBOT_HOME
+    root = str(getattr(ds, "root", root))
 
     for ei, ep in enumerate(eps):
         z = np.load(os.path.join(ep, "data.npz"))
@@ -130,6 +192,13 @@ def main():
         print(f"  [{ei+1}/{len(eps)}] {os.path.basename(ep)}: {written} frames")
 
     ds.finalize()
+
+    # the decision travels with the data: "which episodes did this train on" has
+    # an answer on the Hub, not just on the machine that ran the conversion
+    if manifest_src:
+        shutil.copy(manifest_src, os.path.join(root, "curation.json"))
+        print(f"recorded curation.json in the dataset ({manifest.summary()})")
+
     print(f"done. local dataset: {root}")
 
     if args.push:

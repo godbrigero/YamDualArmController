@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 readonly REPOSITORY_URL="${YAM_INITIALIZER_REPOSITORY_URL:-https://github.com/godbrigero/YamDualArmController.git}"
+readonly WINNOW_REPOSITORY_URL="${YAM_INITIALIZER_WINNOW_URL:-https://github.com/AdamEXu/winnow.git}"
 readonly PROJECT_DIRECTORY="$PWD"
 
 temporary_directory=""
@@ -88,6 +89,62 @@ sync_managed_directory() {
     cp -R "$source_directory/." "$target_directory/"
 }
 
+# Episode triage lives in a separate repository with its own pinned environment,
+# so it is cloned beside the project rather than vendored into it. Curation is
+# optional — a clone failure must not take the whole setup down with it.
+install_winnow() {
+    local project_directory=$1
+    local target_directory="$project_directory/third_party/winnow"
+    local staging_directory
+
+    # -e, not -d: a submodule or worktree checkout has a .git *file*, and this
+    # function must never delete a checkout it did not create.
+    if [[ -e "$target_directory/.git" ]]; then
+        printf 'Updating: %s/\n' "$target_directory"
+        git -C "$target_directory" pull --ff-only --quiet || \
+            printf 'Could not update winnow; keeping the existing checkout.\n' >&2
+        return 0
+    fi
+
+    # an empty directory is what an uninitialized submodule entry or an
+    # interrupted clone leaves behind; that should not lock installation out
+    if [[ -e "$target_directory" ]] && [[ -n "$(ls -A "$target_directory" 2>/dev/null)" ]]; then
+        printf 'Not touching existing %s: it is not a git checkout, so winnow was\n' \
+            "$target_directory" >&2
+        printf 'not installed. Move it aside if you want the initializer to manage it.\n' >&2
+        return 0
+    fi
+
+    # Clone to a sibling and move it into place, so a failed clone only ever
+    # removes what this function just created. Every step is guarded: curation
+    # is optional and must never take the rest of the setup down with it, which
+    # an unguarded failure would do under `set -e`.
+    printf 'Installing: %s/\n' "$target_directory"
+    mkdir -p "$(dirname "$target_directory")" || { winnow_unavailable; return 0; }
+    staging_directory="$(mktemp -d "$(dirname "$target_directory")/.winnow-clone.XXXXXX")" || {
+        winnow_unavailable
+        return 0
+    }
+
+    # git clone accepts an existing empty directory, so mktemp's is reused as-is
+    if git clone --depth 1 --quiet "$WINNOW_REPOSITORY_URL" "$staging_directory"; then
+        rmdir "$target_directory" 2>/dev/null || true
+        if mv -- "$staging_directory" "$target_directory"; then
+            return 0
+        fi
+    fi
+
+    rm -rf -- "$staging_directory" 2>/dev/null || true
+    winnow_unavailable
+    return 0
+}
+
+winnow_unavailable() {
+    printf 'Could not install winnow from %s. Episode curation will be unavailable\n' \
+        "$WINNOW_REPOSITORY_URL" >&2
+    printf 'until you clone it into third_party/winnow yourself.\n' >&2
+}
+
 run_project_initialization() {
     local repository_directory=$1
     local project_directory=$2
@@ -119,9 +176,17 @@ run_project_initialization() {
         return 1
     fi
 
+    if [[ ! -f "$repository_directory/curation/__main__.py" ]]; then
+        printf 'Missing required directory in cloned repository: %s\n' \
+            "$repository_directory/curation" >&2
+        return 1
+    fi
+
     sync_managed_file "$source_calibration_script" "$target_scripts_directory/calibrate.py"
     sync_managed_directory "$source_bridge_directory" "$target_bridge_directory"
     sync_managed_directory "$source_teleoperation_directory" "$target_teleoperation_directory"
+    sync_managed_directory "$repository_directory/curation" "$project_directory/curation"
+    install_winnow "$project_directory"
     sync_managed_directory "$source_skill_directory" "$project_directory/.agents/skills/connect-yam-leader"
     sync_managed_directory "$source_skill_directory" "$project_directory/.claude/skills/connect-yam-leader"
 
