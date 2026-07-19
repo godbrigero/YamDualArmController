@@ -106,29 +106,43 @@ install_winnow() {
         return 0
     fi
 
-    if [[ -e "$target_directory" ]]; then
+    # an empty directory is what an uninitialized submodule entry or an
+    # interrupted clone leaves behind; that should not lock installation out
+    if [[ -e "$target_directory" ]] && [[ -n "$(ls -A "$target_directory" 2>/dev/null)" ]]; then
         printf 'Not touching existing %s: it is not a git checkout, so winnow was\n' \
             "$target_directory" >&2
         printf 'not installed. Move it aside if you want the initializer to manage it.\n' >&2
         return 0
     fi
 
-    # clone to a sibling and move it into place, so a failed clone only ever
-    # removes what this function just created
+    # Clone to a sibling and move it into place, so a failed clone only ever
+    # removes what this function just created. Every step is guarded: curation
+    # is optional and must never take the rest of the setup down with it, which
+    # an unguarded failure would do under `set -e`.
     printf 'Installing: %s/\n' "$target_directory"
-    mkdir -p "$(dirname "$target_directory")"
-    staging_directory="$(mktemp -d "$(dirname "$target_directory")/.winnow-clone.XXXXXX")"
-    rmdir "$staging_directory"
-
-    if git clone --depth 1 --quiet "$WINNOW_REPOSITORY_URL" "$staging_directory"; then
-        mv -- "$staging_directory" "$target_directory"
+    mkdir -p "$(dirname "$target_directory")" || { winnow_unavailable; return 0; }
+    staging_directory="$(mktemp -d "$(dirname "$target_directory")/.winnow-clone.XXXXXX")" || {
+        winnow_unavailable
         return 0
+    }
+
+    # git clone accepts an existing empty directory, so mktemp's is reused as-is
+    if git clone --depth 1 --quiet "$WINNOW_REPOSITORY_URL" "$staging_directory"; then
+        rmdir "$target_directory" 2>/dev/null || true
+        if mv -- "$staging_directory" "$target_directory"; then
+            return 0
+        fi
     fi
 
-    rm -rf -- "$staging_directory"
-    printf 'Could not clone winnow from %s. Episode curation will be unavailable\n' \
+    rm -rf -- "$staging_directory" 2>/dev/null || true
+    winnow_unavailable
+    return 0
+}
+
+winnow_unavailable() {
+    printf 'Could not install winnow from %s. Episode curation will be unavailable\n' \
         "$WINNOW_REPOSITORY_URL" >&2
-    printf 'until you clone it into %s yourself.\n' "$target_directory" >&2
+    printf 'until you clone it into third_party/winnow yourself.\n' >&2
 }
 
 run_project_initialization() {

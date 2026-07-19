@@ -159,6 +159,8 @@ def main():
         repo_id=args.repo_id, fps=args.fps, features=build_features(h, w, cam_keys),
         robot_type=robot_type, use_videos=True,
     )
+    # where it actually landed, which is not the guess above under HF_LEROBOT_HOME
+    root = str(getattr(ds, "root", root))
 
     for ei, ep in enumerate(eps):
         z = np.load(os.path.join(ep, "data.npz"))
@@ -192,11 +194,9 @@ def main():
     ds.finalize()
 
     # the decision travels with the data: "which episodes did this train on" has
-    # an answer on the Hub, not just on the machine that ran the conversion.
-    # ds.root rather than the path guessed above, which is wrong under
-    # HF_LEROBOT_HOME — and a wrong guess here would throw away a finished run.
+    # an answer on the Hub, not just on the machine that ran the conversion
     if manifest_src:
-        shutil.copy(manifest_src, os.path.join(getattr(ds, "root", root), "curation.json"))
+        shutil.copy(manifest_src, os.path.join(root, "curation.json"))
         print(f"recorded curation.json in the dataset ({manifest.summary()})")
 
     print(f"done. local dataset: {root}")

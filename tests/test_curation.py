@@ -9,10 +9,12 @@ conversion applies.
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
+from curation import pipeline
 from curation.manifest import (
     DEFAULT_DETECTORS,
     RIG_AGNOSTIC_DETECTORS,
@@ -130,6 +132,105 @@ class ManifestFileTest(unittest.TestCase):
                 json.dumps({"kept": ["episode_0000"], "rejected": {}, "future_field": 1})
             )
             self.assertEqual(load_manifest(src).kept, ["episode_0000"])
+
+
+class CoverageTest(unittest.TestCase):
+    """Which episodes an artifact accounts for — the skip decision rests on this.
+
+    Filesystem only: no winnow, no rerun, nothing spawned.
+    """
+
+    def corpus(self, directory, count=3):
+        for index in range(count):
+            os.makedirs(os.path.join(directory, f"episode_{index:04d}"))
+        os.makedirs(pipeline.data_dir(directory), exist_ok=True)
+        return {f"episode_{index:04d}" for index in range(count)}
+
+    def test_json_artifacts_are_keyed_by_episode(self):
+        with tempfile.TemporaryDirectory() as src:
+            self.corpus(src)
+            Path(pipeline.artifact(src, "features.json")).write_text(
+                json.dumps({"episode_0000": {}, "episode_0001": {}})
+            )
+            self.assertEqual(pipeline.covered(src, "features"),
+                             {"episode_0000", "episode_0001"})
+
+    def test_a_partial_ingest_does_not_count_as_done(self):
+        with tempfile.TemporaryDirectory() as src:
+            episodes = self.corpus(src)
+            rrd = pipeline.artifact(src, "rrd")
+            os.makedirs(rrd)
+            Path(os.path.join(rrd, "episode_0000.rrd")).write_text("")
+            self.assertEqual(episodes - pipeline.covered(src, "ingest"),
+                             {"episode_0001", "episode_0002"})
+
+    def test_transcode_needs_every_camera(self):
+        with tempfile.TemporaryDirectory() as src:
+            self.corpus(src)
+            video = pipeline.artifact(src, "video_h264")
+            for name, cams in (("episode_0000", pipeline.CAMS), ("episode_0001", ("top",))):
+                os.makedirs(os.path.join(video, name))
+                for cam in cams:
+                    Path(os.path.join(video, name, f"{cam}.mp4")).write_text("")
+            # episode_0001 was interrupted after one camera; ingest would
+            # otherwise silently attach only that one
+            self.assertEqual(pipeline.covered(src, "transcode"), {"episode_0000"})
+
+    def test_transcode_leftovers_do_not_make_the_stage_rerun_forever(self):
+        """transcode only ever adds files, so its stale entries must not count.
+
+        Every other stage rewrites its artifact wholesale, so a deleted episode
+        clears after one run. A leftover transcode directory would look stale on
+        every invocation and re-run the stage forever.
+        """
+        self.assertNotIn("transcode", pipeline.STALE_MATTERS)
+        for stage in ("vision", "ingest", "features", "detect"):
+            self.assertIn(stage, pipeline.STALE_MATTERS)
+
+    def test_missing_artifact_covers_nothing(self):
+        with tempfile.TemporaryDirectory() as src:
+            self.corpus(src)
+            self.assertEqual(pipeline.covered(src, "detect"), set())
+
+    def test_unreadable_artifact_covers_nothing_rather_than_raising(self):
+        with tempfile.TemporaryDirectory() as src:
+            self.corpus(src)
+            Path(pipeline.artifact(src, "detections.json")).write_text("{ truncated")
+            self.assertEqual(pipeline.covered(src, "detect"), set())
+
+
+class OrphanTest(unittest.TestCase):
+    def test_recordings_without_an_episode_are_set_aside_not_deleted(self):
+        with tempfile.TemporaryDirectory() as src:
+            os.makedirs(os.path.join(src, "episode_0000"))
+            rrd = pipeline.artifact(src, "rrd")
+            os.makedirs(rrd)
+            for name in ("episode_0000", "episode_0009"):
+                Path(os.path.join(rrd, f"{name}.rrd")).write_text("recording")
+
+            pipeline.prune_orphans(src)
+
+            # the live one is untouched, the orphan is out of the glob but on disk
+            self.assertTrue(os.path.exists(os.path.join(rrd, "episode_0000.rrd")))
+            self.assertFalse(os.path.exists(os.path.join(rrd, "episode_0009.rrd")))
+            aside = os.path.join(rrd, "orphaned", "episode_0009.rrd")
+            self.assertEqual(Path(aside).read_text(), "recording")
+            self.assertEqual(pipeline.covered(src, "ingest"), {"episode_0000"})
+
+    def test_nothing_to_prune_leaves_no_directory_behind(self):
+        with tempfile.TemporaryDirectory() as src:
+            os.makedirs(os.path.join(src, "episode_0000"))
+            os.makedirs(pipeline.artifact(src, "rrd"))
+            pipeline.prune_orphans(src)
+            self.assertFalse(os.path.exists(pipeline.artifact(src, "rrd/orphaned")))
+
+
+class PathTest(unittest.TestCase):
+    def test_artifact_paths_are_absolute(self):
+        """Winnow's stages run with cwd set to the submodule, so a relative
+        artifact path would resolve inside third_party/winnow instead."""
+        self.assertTrue(os.path.isabs(pipeline.data_dir("episodes/demo")))
+        self.assertTrue(os.path.isabs(pipeline.artifact("episodes/demo", "metrics.json")))
 
 
 class FilterTest(unittest.TestCase):

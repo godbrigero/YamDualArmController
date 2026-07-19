@@ -46,8 +46,23 @@ ARTIFACTS = {
 }
 DEFAULT_STAGES = ("vision", "ingest", "features", "detect")
 
-# every episode needs these before winnow can read it; the recorder writes them
-REQUIRED = ("data.npz", "top.mp4", "wrist_1.mp4", "wrist_2.mp4")
+# winnow's paths.CAMS; every episode needs all of them plus its npz
+CAMS = ("top", "wrist_1", "wrist_2")
+REQUIRED = ("data.npz", *(f"{cam}.mp4" for cam in CAMS))
+
+# Stages whose artifact is rewritten wholesale from the current corpus, so a
+# deleted episode disappears from it after one run. `transcode` is not one of
+# them: it only ever adds files, so its leftovers would look stale forever and
+# re-run the stage on every invocation. They are also inert — ingest reads
+# transcodes by episode name and never enumerates the directory.
+STALE_MATTERS = ("vision", "ingest", "features", "detect", "residual")
+
+# a stage that re-runs invalidates whatever consumed its output: ingest is what
+# links the transcodes into the .rrd, and detect is what folds residual.json
+# into the panel. Both consumers run later in the stage order, so forcing them
+# when their producer runs is enough — and it keeps an unchanged corpus from
+# redoing either of them on every invocation.
+DEPENDENTS = {"transcode": "ingest", "residual": "detect"}
 
 
 class WinnowError(RuntimeError):
@@ -151,7 +166,12 @@ def covered(src: str, stage: str) -> set:
         return {os.path.basename(path)[: -len(".rrd")]
                 for path in glob.glob(os.path.join(target, "*.rrd"))}
     if stage == "transcode":
-        return {os.path.basename(path) for path in glob.glob(os.path.join(target, "episode_*"))}
+        # a directory is not enough: transcode.py self-skips per file, so an
+        # interrupted run leaves an episode with only some of its cameras and
+        # ingest would silently attach just those
+        return {os.path.basename(path)
+                for path in glob.glob(os.path.join(target, "episode_*"))
+                if all(os.path.exists(os.path.join(path, f"{cam}.mp4")) for cam in CAMS)}
     try:
         with open(target) as handle:
             return set(json.load(handle))
@@ -160,17 +180,28 @@ def covered(src: str, stage: str) -> set:
 
 
 def prune_orphans(src: str) -> None:
-    """Drop `.rrd`s whose episode folder is gone, so the corpus cannot lie.
+    """Set aside `.rrd`s whose episode folder is gone, so the corpus cannot lie.
 
     `open_corpus` globs every `.rrd` it finds, so a recording deleted after
-    ingest would otherwise still be served, judged, and listed as kept.
+    ingest would otherwise still be served, judged, and reported as kept.
+
+    They are moved rather than deleted. An `.rrd` is expensive to rebuild, and
+    "the episode folder is gone" is also what archiving raw footage to cold
+    storage looks like — that must not silently destroy the derived recordings.
     """
     live = episode_names(src)
-    for path in glob.glob(os.path.join(artifact(src, "rrd"), "*.rrd")):
-        if os.path.basename(path)[: -len(".rrd")] not in live:
-            print(f"[curate] dropping {os.path.basename(path)}: no such episode any more",
-                  flush=True)
-            os.remove(path)
+    orphans = [path for path in glob.glob(os.path.join(artifact(src, "rrd"), "*.rrd"))
+               if os.path.basename(path)[: -len(".rrd")] not in live]
+    if not orphans:
+        return
+
+    # a subdirectory is enough to hide them: open_corpus globs rrd/*.rrd
+    aside = artifact(src, os.path.join("rrd", "orphaned"))
+    os.makedirs(aside, exist_ok=True)
+    for path in orphans:
+        shutil.move(path, os.path.join(aside, os.path.basename(path)))
+    print(f"[curate] set aside {len(orphans)} recording(s) with no episode folder "
+          f"-> {os.path.relpath(aside, os.path.abspath(src))}", flush=True)
 
 
 def _run(script: str, src: str, extra=(), quiet=False) -> None:
@@ -198,10 +229,12 @@ def run_pipeline(src: str, stages=DEFAULT_STAGES, refresh=False, force=()) -> li
     os.makedirs(data_dir(src), exist_ok=True)
     prune_orphans(src)
     episodes = episode_names(src)
+    force = set(force)
 
     for stage in stages:
         accounted = covered(src, stage)
-        missing, stale = episodes - accounted, accounted - episodes
+        missing = episodes - accounted
+        stale = (accounted - episodes) if stage in STALE_MATTERS else set()
         if not refresh and stage not in force and not missing and not stale:
             print(f"[curate] {stage}: already done ({len(episodes)} episodes)", flush=True)
             continue
@@ -213,16 +246,21 @@ def run_pipeline(src: str, stages=DEFAULT_STAGES, refresh=False, force=()) -> li
             # an episode was deleted after this artifact was written; regenerate
             # rather than let a ghost be judged and reported
             reason = f"{len(stale)} episodes no longer exist"
-        # a directory artifact can hold a half-written file from an interrupted
-        # run, and the stages self-skip on existence, so clear it first
+        # transcode is the one stage that self-skips per output file, so a
+        # refresh has to clear it to have any effect — and a truncated mp4 from
+        # an interrupted run would otherwise never be replaced. Every other
+        # stage rewrites its artifact in place, where deleting first would only
+        # mean a failed re-run leaves nothing behind.
         target = artifact(src, ARTIFACTS[stage])
-        if refresh and os.path.isdir(target):
+        if stage == "transcode" and refresh and os.path.isdir(target):
             shutil.rmtree(target)
         print(f"[curate] {stage}: running ({reason})", flush=True)
         # detect.py ends by scoring itself against the hand labels of winnow's own
         # reference corpus, which say nothing about this one. The firings we care
         # about come back through detections.json.
         quiet = stage in ("detect", "residual")
+        if stage in DEPENDENTS:
+            force.add(DEPENDENTS[stage])
         try:
             _run(os.path.join("winnow", f"{stage}.py"), src, quiet=quiet)
         except WinnowError:
@@ -256,14 +294,14 @@ def query_metrics(src: str, where: str):
     try:
         _run(QUERY_SCRIPT, src, ["--where", where, "--out", out], quiet=True)
     except WinnowError as error:
-        # by far the likeliest cause is a typo in the predicate, and DataFusion's
-        # schema error is much easier to act on next to the available columns
-        # the child's traceback is all datafusion internals; its last line is
-        # the part that names the offending column
-        stderr = (getattr(error.__cause__, "stderr", "") or "").strip().splitlines()
+        stderr = (getattr(error.__cause__, "stderr", "") or "").strip()
+        if "Schema error" not in stderr:
+            raise            # not a bad predicate; the original message is the useful one
+        # DataFusion's schema error is much easier to act on next to the column
+        # list, and its traceback above that line is all internals
         raise WinnowError(
             f"the query failed. Available columns: {', '.join(METRIC_COLUMNS)}.\n"
-            f"  --where {where}\n  " + "\n  ".join(stderr[-2:])
+            f"  --where {where}\n  " + "\n  ".join(stderr.splitlines()[-2:])
         ) from error
     with open(out) as handle:
         result = json.load(handle)

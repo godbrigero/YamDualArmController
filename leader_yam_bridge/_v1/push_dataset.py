@@ -21,8 +21,25 @@ from huggingface_hub import HfApi, upload_large_folder
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 try:
     from curation.manifest import load_manifest
-except ImportError:  # copied out of the project on its own; upload still works
-    load_manifest = lambda _: None  # noqa: E731
+except ImportError:
+    # copied out of the project on its own. Read the manifest with the stdlib
+    # rather than reporting a missing one, which would be a false statement
+    # about the dataset and would make --require-curation refuse a curated push.
+    import json
+
+    def load_manifest(local):
+        try:
+            with open(os.path.join(local, "curation.json")) as handle:
+                raw = json.load(handle)
+        except (OSError, ValueError):
+            return None
+        return argparse.Namespace(
+            kept=raw.get("kept", []),
+            rejected=raw.get("rejected", {}),
+            query=raw.get("query", ""),
+            summary=lambda: f"kept {len(raw.get('kept', []))} of "
+                            f"{len(raw.get('kept', [])) + len(raw.get('rejected', {}))} episodes",
+        )
 
 
 def report_curation(local, require):

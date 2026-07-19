@@ -123,19 +123,16 @@ def main() -> int:
         return 0
 
     detectors = parse_detectors(args.detectors)
-    stages, force = list(DEFAULT_STAGES), set()
+    # run_pipeline re-runs a stage's consumer whenever the stage itself runs
+    # (transcode -> ingest, residual -> detect), so ordering is all that is
+    # needed here
+    stages = list(DEFAULT_STAGES)
     if args.transcode:
         stages.insert(1, "transcode")
-        # ingest.log_video is what links the transcodes into the .rrd, so
-        # transcoding an already-ingested corpus achieves nothing on its own
-        force.add("ingest")
     if "debris_outside_basket" in detectors:
-        # residual.json has to exist before detect.py folds the stray-debris
-        # detector into the panel, so detect runs after it and runs again
         stages.insert(stages.index("detect"), "residual")
-        force.add("detect")
 
-    warnings = run_pipeline(args.src, stages=stages, refresh=args.refresh, force=force)
+    warnings = run_pipeline(args.src, stages=stages, refresh=args.refresh)
     metrics, kept_by_query = query_metrics(args.src, args.where)
     manifest = decide(
         metrics,
